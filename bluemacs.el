@@ -279,6 +279,64 @@ CALLBACK is called with parsed JSON response."
       (format-time-string "%Y-%m-%d %H:%M" (date-to-time timestamp))
     "Unknown time"))
 
+(defun bluemacs--byte-to-char-pos (text byte-pos)
+  "Convert BYTE-POS (UTF-8 byte offset) in TEXT to character position."
+  (let ((byte-count 0)
+        (char-pos 0))
+    (while (and (< char-pos (length text))
+                (< byte-count byte-pos))
+      (let* ((char (aref text char-pos))
+             (char-bytes (length (encode-coding-string (string char) 'utf-8))))
+        (setq byte-count (+ byte-count char-bytes))
+        (setq char-pos (1+ char-pos))))
+    char-pos))
+
+(defun bluemacs--buttonize-with-facets (text facets)
+  "Make URLs in TEXT clickable using FACETS metadata.
+FACETS is a list of facet objects from Bluesky API that describe
+links, mentions, and other rich text features."
+  (if (not facets)
+      ;; Fallback: try to detect URLs with regex if no facets provided
+      (with-temp-buffer
+        (insert text)
+        (goto-char (point-min))
+        (while (re-search-forward
+                "\\bhttps?://[^ \t\n\r\"'<>]*[^ \t\n\r\"'<>.,;:?!]" nil t)
+          (let ((url (match-string 0)))
+            (make-text-button (match-beginning 0) (match-end 0)
+                              'url url
+                              'face 'link
+                              'follow-link t
+                              'action (lambda (button)
+                                        (browse-url (button-get button 'url)))
+                              'help-echo url)))
+        (buffer-substring (point-min) (point-max)))
+    ;; Use facets to create buttons
+    (with-temp-buffer
+      (insert text)
+      (dolist (facet facets)
+        (let* ((index (plist-get facet :index))
+               (features (plist-get facet :features))
+               (byte-start (plist-get index :byteStart))
+               (byte-end (plist-get index :byteEnd)))
+          (when (and byte-start byte-end features)
+            (dolist (feature features)
+              (let ((type (plist-get feature :$type)))
+                (when (string= type "app.bsky.richtext.facet#link")
+                  (let* ((uri (plist-get feature :uri))
+                         ;; Convert byte positions to character positions
+                         (char-start (1+ (bluemacs--byte-to-char-pos text byte-start)))
+                         (char-end (1+ (bluemacs--byte-to-char-pos text byte-end))))
+                    (when (and uri (> char-end char-start) (<= char-end (point-max)))
+                      (make-text-button char-start char-end
+                                        'url uri
+                                        'face 'link
+                                        'follow-link t
+                                        'action (lambda (button)
+                                                  (browse-url (button-get button 'url)))
+                                        'help-echo uri)))))))))
+      (buffer-substring (point-min) (point-max)))))
+
 (defun bluemacs--format-post (post &optional indent-level)
   "Format a single POST for display.
 INDENT-LEVEL determines indentation for nested replies (default 0)."
@@ -293,31 +351,33 @@ INDENT-LEVEL determines indentation for nested replies (default 0)."
              (author-handle (or (plist-get author :handle) "unknown"))
              (author-display (or (plist-get author :displayName) author-handle))
              (text (or (plist-get record :text) "[No text]"))
+             (facets (plist-get record :facets))
              (created-at (plist-get record :createdAt))
              (like-count (or (plist-get (or post-data post) :likeCount) 0))
              (repost-count (or (plist-get (or post-data post) :repostCount) 0))
              (reply-count (or (plist-get (or post-data post) :replyCount) 0))
-             (images (bluemacs--format-embed-images embed)))
-        (propertize
-         (concat
-          indent-str
-          (format "%s (@%s) - %s\n%s%s\n"
-                  (propertize author-display 'face 'bold)
-                  author-handle
-                  (bluemacs--format-timestamp created-at)
-                  indent-str
-                  text)
-          (when images
-            (concat indent-str images "\n"))
-          (format "%s[replies: %d  reposts: %d  likes: %d]%s\n%s%s\n"
-                  indent-str
-                  reply-count
-                  repost-count
-                  like-count
-                  (if (> reply-count 0) " - press 't' to view thread" "")
-                  indent-str
-                  (make-string 80 ?-)))
-         'bluemacs-post-uri uri))
+             (images (bluemacs--format-embed-images embed))
+             (formatted-text (bluemacs--buttonize-with-facets text facets))
+             (post-header (format "%s (@%s) - %s\n%s"
+                                  (propertize author-display 'face 'bold)
+                                  author-handle
+                                  (bluemacs--format-timestamp created-at)
+                                  indent-str))
+             (post-footer (format "\n%s[replies: %d  reposts: %d  likes: %d]%s\n%s%s\n"
+                                  indent-str
+                                  reply-count
+                                  repost-count
+                                  like-count
+                                  (if (> reply-count 0) " - press 't' to view thread" "")
+                                  indent-str
+                                  (make-string 80 ?-))))
+        (concat
+         (propertize indent-str 'bluemacs-post-uri uri)
+         (propertize post-header 'bluemacs-post-uri uri)
+         (propertize formatted-text 'bluemacs-post-uri uri)
+         (when images
+           (propertize (concat "\n" indent-str images) 'bluemacs-post-uri uri))
+         (propertize post-footer 'bluemacs-post-uri uri)))
     (error
      (message "Error formatting post: %s" (error-message-string err))
      (format "[Error displaying post: %s]\n%s\n"
