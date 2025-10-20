@@ -17,6 +17,12 @@
 ;; Usage:
 ;;   M-x bluemacs-login
 ;;   M-x bluemacs-timeline
+;;
+;; Auto-refresh:
+;;   Set `bluemacs-auto-refresh-interval' to enable automatic timeline refresh.
+;;   Use M-x bluemacs-set-refresh-interval to change the interval.
+;;   Use M-x bluemacs-toggle-auto-refresh to toggle auto-refresh on/off.
+;;   In the timeline buffer, press 'a' to toggle or 'i' to set interval.
 
 ;;; Code:
 
@@ -41,6 +47,14 @@
   :type 'integer
   :group 'bluemacs)
 
+(defcustom bluemacs-auto-refresh-interval nil
+  "Auto-refresh interval for timeline in seconds.
+If nil, auto-refresh is disabled.
+If set to a number, the timeline will automatically refresh at that interval."
+  :type '(choice (const :tag "Disabled" nil)
+                 (integer :tag "Seconds"))
+  :group 'bluemacs)
+
 ;;; Variables
 
 (defvar bluemacs-access-token nil
@@ -54,6 +68,9 @@
 
 (defvar bluemacs-timeline-buffer "*Bluesky Timeline*"
   "Buffer name for displaying timeline.")
+
+(defvar bluemacs-refresh-timer nil
+  "Timer object for auto-refreshing timeline.")
 
 ;;; Authentication
 
@@ -218,23 +235,96 @@ CALLBACK is called with parsed JSON response."
   (interactive)
   (bluemacs-timeline))
 
+;;; Auto-refresh
+
+(declare-function bluemacs-timeline "bluemacs")
+
+(defun bluemacs--start-refresh-timer ()
+  "Start the auto-refresh timer if configured."
+  (bluemacs--stop-refresh-timer)
+  (when (and bluemacs-auto-refresh-interval
+             (> bluemacs-auto-refresh-interval 0))
+    (setq bluemacs-refresh-timer
+          (run-at-time bluemacs-auto-refresh-interval
+                       bluemacs-auto-refresh-interval
+                       #'bluemacs--auto-refresh-timeline))))
+
+(defun bluemacs--stop-refresh-timer ()
+  "Stop the auto-refresh timer."
+  (when bluemacs-refresh-timer
+    (cancel-timer bluemacs-refresh-timer)
+    (setq bluemacs-refresh-timer nil)))
+
+(defun bluemacs--auto-refresh-timeline ()
+  "Auto-refresh timeline if the timeline buffer is visible."
+  (when (and (buffer-live-p (get-buffer bluemacs-timeline-buffer))
+             (get-buffer-window bluemacs-timeline-buffer t))
+    (bluemacs-timeline)))
+
+;;;###autoload
+(defun bluemacs-toggle-auto-refresh ()
+  "Toggle auto-refresh for the timeline."
+  (interactive)
+  (if bluemacs-refresh-timer
+      (progn
+        (bluemacs--stop-refresh-timer)
+        (message "Auto-refresh disabled"))
+    (if bluemacs-auto-refresh-interval
+        (progn
+          (bluemacs--start-refresh-timer)
+          (message "Auto-refresh enabled (every %d seconds)" bluemacs-auto-refresh-interval))
+      (let ((interval (read-number "Refresh interval (seconds): " 60)))
+        (setq bluemacs-auto-refresh-interval interval)
+        (bluemacs--start-refresh-timer)
+        (message "Auto-refresh enabled (every %d seconds)" interval)))))
+
+;;;###autoload
+(defun bluemacs-set-refresh-interval (seconds)
+  "Set the auto-refresh interval to SECONDS."
+  (interactive "nRefresh interval (seconds, 0 to disable): ")
+  (setq bluemacs-auto-refresh-interval (if (> seconds 0) seconds nil))
+  (if bluemacs-auto-refresh-interval
+      (progn
+        (bluemacs--start-refresh-timer)
+        (message "Auto-refresh set to %d seconds" seconds))
+    (bluemacs--stop-refresh-timer)
+    (message "Auto-refresh disabled")))
+
 ;;; Major Mode
 
-(defvar bluemacs-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "g") 'bluemacs-refresh-timeline)
-    (define-key map (kbd "q") 'quit-window)
-    (define-key map (kbd "n") 'next-line)
-    (define-key map (kbd "p") 'previous-line)
-    map)
+(defvar bluemacs-mode-map nil
   "Keymap for `bluemacs-mode'.")
 
-(define-derived-mode bluemacs-mode special-mode "Bluemacs"
+(unless bluemacs-mode-map
+  (let ((map (make-sparse-keymap)))
+    (suppress-keymap map)
+    (define-key map "g" #'bluemacs-refresh-timeline)
+    (define-key map "a" #'bluemacs-toggle-auto-refresh)
+    (define-key map "i" #'bluemacs-set-refresh-interval)
+    (define-key map "q" #'quit-window)
+    (define-key map "n" #'next-line)
+    (define-key map "p" #'previous-line)
+    (define-key map "?" #'describe-mode)
+    (define-key map " " #'scroll-up-command)
+    (define-key map (kbd "DEL") #'scroll-down-command)
+    (define-key map (kbd "S-SPC") #'scroll-down-command)
+    (define-key map "<" #'beginning-of-buffer)
+    (define-key map ">" #'end-of-buffer)
+    (setq bluemacs-mode-map map)))
+
+(define-derived-mode bluemacs-mode nil "Bluemacs"
   "Major mode for displaying Bluesky timeline.
 
+Key bindings:
 \\{bluemacs-mode-map}"
-  (setq truncate-lines nil
-        buffer-read-only t))
+  (kill-all-local-variables)
+  (use-local-map bluemacs-mode-map)
+  (setq major-mode 'bluemacs-mode
+        mode-name "Bluemacs"
+        truncate-lines nil
+        buffer-read-only t)
+  (add-hook 'kill-buffer-hook #'bluemacs--stop-refresh-timer nil t)
+  (bluemacs--start-refresh-timer))
 
 ;;; Footer
 
