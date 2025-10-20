@@ -33,6 +33,11 @@
 ;;   Use M-x bluemacs-compose or press 'c' in the timeline to compose a post.
 ;;   In the compose buffer, press C-c C-c to send, C-c C-k to cancel.
 ;;   Or use M-x bluemacs-post to post text directly from the minibuffer.
+;;
+;; Viewing Threads:
+;;   Press 't' on any post to view its thread with all replies.
+;;   Replies are indented to show conversation hierarchy.  Press 'b' to go
+;;   back to Timeline.
 
 ;;; Code:
 
@@ -274,10 +279,14 @@ CALLBACK is called with parsed JSON response."
       (format-time-string "%Y-%m-%d %H:%M" (date-to-time timestamp))
     "Unknown time"))
 
-(defun bluemacs--format-post (post)
-  "Format a single POST for display."
+(defun bluemacs--format-post (post &optional indent-level)
+  "Format a single POST for display.
+INDENT-LEVEL determines indentation for nested replies (default 0)."
   (condition-case err
-      (let* ((post-data (plist-get post :post))
+      (let* ((indent-level (or indent-level 0))
+             (indent-str (make-string (* indent-level 2) ?\s))
+             (post-data (plist-get post :post))
+             (uri (plist-get (or post-data post) :uri))
              (record (plist-get (or post-data post) :record))
              (author (plist-get (or post-data post) :author))
              (embed (plist-get (or post-data post) :embed))
@@ -289,19 +298,26 @@ CALLBACK is called with parsed JSON response."
              (repost-count (or (plist-get (or post-data post) :repostCount) 0))
              (reply-count (or (plist-get (or post-data post) :replyCount) 0))
              (images (bluemacs--format-embed-images embed)))
-        (concat
-         (format "%s (@%s) - %s\n%s\n"
-                 (propertize author-display 'face 'bold)
-                 author-handle
-                 (bluemacs--format-timestamp created-at)
-                 text)
-         (when images
-           (concat images "\n"))
-         (format "[replies: %d  reposts: %d  likes: %d]\n%s\n"
-                 reply-count
-                 repost-count
-                 like-count
-                 (make-string 80 ?-))))
+        (propertize
+         (concat
+          indent-str
+          (format "%s (@%s) - %s\n%s%s\n"
+                  (propertize author-display 'face 'bold)
+                  author-handle
+                  (bluemacs--format-timestamp created-at)
+                  indent-str
+                  text)
+          (when images
+            (concat indent-str images "\n"))
+          (format "%s[replies: %d  reposts: %d  likes: %d]%s\n%s%s\n"
+                  indent-str
+                  reply-count
+                  repost-count
+                  like-count
+                  (if (> reply-count 0) " - press 't' to view thread" "")
+                  indent-str
+                  (make-string 80 ?-)))
+         'bluemacs-post-uri uri))
     (error
      (message "Error formatting post: %s" (error-message-string err))
      (format "[Error displaying post: %s]\n%s\n"
@@ -361,6 +377,78 @@ CALLBACK is called with parsed JSON response."
     (message "Images only work in graphical Emacs (not terminal mode)"))
   (when (get-buffer bluemacs-timeline-buffer)
     (bluemacs-refresh-timeline)))
+
+;;; Thread/Replies
+
+(defun bluemacs--get-post-uri-at-point ()
+  "Get the post URI at point."
+  (get-text-property (point) 'bluemacs-post-uri))
+
+;;;###autoload
+(defun bluemacs-view-thread ()
+  "View the thread/replies for the post at point."
+  (interactive)
+  (unless bluemacs-access-token
+    (user-error "Not logged in.  Run M-x bluemacs-login first"))
+  (let ((uri (bluemacs--get-post-uri-at-point)))
+    (unless uri
+      (user-error "No post at point"))
+    (message "Fetching thread...")
+    (bluemacs--make-request
+     (format "/xrpc/app.bsky.feed.getPostThread?uri=%s&depth=10"
+             (url-hexify-string uri))
+     "GET"
+     nil
+     (lambda (response _status)
+       (let ((thread (plist-get response :thread)))
+         (if thread
+             (bluemacs--display-thread thread)
+           (message "Failed to fetch thread: %s"
+                    (or (plist-get response :message) "Unknown error"))))))))
+
+(defun bluemacs--display-thread (thread)
+  "Display THREAD in a buffer."
+  (let ((buffer (get-buffer-create "*Bluesky Thread*")))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (set-buffer-multibyte t)
+        (setq buffer-file-coding-system 'utf-8)
+        (insert (propertize "Thread View" 'face '(:height 1.5 :weight bold))
+                (propertize " (press 'b' to go back to timeline)\n" 'face 'italic)
+                (make-string 80 ?=)
+                "\n\n")
+        (bluemacs--insert-thread thread 0)
+        (goto-char (point-min))
+        (bluemacs-mode))
+      (switch-to-buffer (current-buffer)))
+    (message "Thread loaded")))
+
+(defun bluemacs--insert-thread (thread indent-level)
+  "Insert THREAD with INDENT-LEVEL into current buffer."
+  (when thread
+    (let* ((post (plist-get thread :post))
+           (replies (plist-get thread :replies)))
+      ;; Insert the main post
+      (when post
+        (insert (bluemacs--format-post (list :post post) indent-level)))
+      ;; Insert replies recursively
+      (when replies
+        (dolist (reply replies)
+          (bluemacs--insert-thread reply (1+ indent-level)))))))
+
+;;;###autoload
+(defun bluemacs-back-to-timeline ()
+  "Close current view and return to timeline."
+  (interactive)
+  (let ((timeline-buffer (get-buffer bluemacs-timeline-buffer)))
+    (if timeline-buffer
+        (progn
+          (kill-buffer)
+          (switch-to-buffer timeline-buffer))
+      (progn
+        (kill-buffer)
+        (bluemacs-timeline)))))
 
 ;;; Posting
 
@@ -499,6 +587,8 @@ CALLBACK is called with parsed JSON response."
     (suppress-keymap map)
     (define-key map "g" #'bluemacs-refresh-timeline)
     (define-key map "c" #'bluemacs-compose)
+    (define-key map "t" #'bluemacs-view-thread)
+    (define-key map "b" #'bluemacs-back-to-timeline)
     (define-key map "a" #'bluemacs-toggle-auto-refresh)
     (define-key map "i" #'bluemacs-set-refresh-interval)
     (define-key map "I" #'bluemacs-toggle-images)

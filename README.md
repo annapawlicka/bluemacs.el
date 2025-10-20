@@ -5,7 +5,10 @@ A (WIP) Bluesky client for Emacs.
 ## Features
 
 - Secure authentication with Bluesky
+- View your timeline with UTF-8 support (including emojis)
 - Display embedded images inline (in graphical Emacs)
+- Compose and post text updates
+- View conversation threads with replies
 - Auto-refresh timeline at configurable intervals
 - Simple keybindings
 
@@ -70,6 +73,9 @@ In the timeline buffer:
 | Key | Action                        |
 |-----|-------------------------------|
 | `g` | Refresh timeline              |
+| `c` | Compose new post              |
+| `t` | View thread/replies           |
+| `b` | Back to timeline              |
 | `a` | Toggle auto-refresh           |
 | `i` | Set refresh interval          |
 | `I` | Toggle image display          |
@@ -106,6 +112,40 @@ M-x bluemacs-toggle-auto-refresh
 ```
 
 **Note:** Auto-refresh only works when the timeline buffer is visible, so it won't waste resources in the background.
+
+## Posting
+
+bluemacs allows you to compose and post text updates to Bluesky.
+
+### Compose in Buffer (Recommended)
+
+1. Press `c` in the timeline (or run `M-x bluemacs-compose`)
+2. A compose buffer opens with instructions
+3. Write your post (max 300 characters)
+4. Press `C-c C-c` to send or `C-c C-k` to cancel
+
+### Quick Post from Minibuffer
+
+```elisp
+M-x bluemacs-post RET
+Post text: Your message here RET
+```
+
+**Note:** Posts are limited to 300 characters. The package will validate length before posting.
+
+## Viewing Threads
+
+View conversation threads with all replies:
+
+1. Navigate to any post in the timeline
+2. Press `t` to view the full thread
+3. Replies are indented to show conversation hierarchy
+4. Press `b` to go back to the timeline
+
+**Features:**
+- Fetches up to 10 levels of nested replies
+- 2-space indentation per reply level
+- Shows reply counts and hints when posts have replies
 
 ## Images
 
@@ -200,6 +240,10 @@ With credentials saved, `bluemacs-login` will automatically use them without pro
 | `bluemacs-logout`                 | Log out from current session             |
 | `bluemacs-timeline`               | Fetch and display timeline               |
 | `bluemacs-refresh-timeline`       | Refresh the current timeline             |
+| `bluemacs-compose`                | Compose a new post in buffer             |
+| `bluemacs-post`                   | Post text from minibuffer                |
+| `bluemacs-view-thread`            | View thread/replies for post at point    |
+| `bluemacs-back-to-timeline`       | Return to timeline from thread view      |
 | `bluemacs-toggle-auto-refresh`    | Toggle auto-refresh on/off               |
 | `bluemacs-set-refresh-interval`   | Set auto-refresh interval                |
 | `bluemacs-toggle-images`          | Toggle image display on/off              |
@@ -220,12 +264,14 @@ With credentials saved, `bluemacs-login` will automatically use them without pro
 
 ## Roadmap
 
+Completed features:
+- [x] Compose and post new text skeets
+- [x] Thread view
+
 Future features planned:
-- [ ] Compose and post new skeets
 - [ ] Reply to posts
 - [ ] Like and repost functionality
 - [ ] View user profiles
-- [ ] Thread view
 - [ ] Notifications
 
 ## Contributing
