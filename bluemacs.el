@@ -28,6 +28,11 @@
 ;;   Embedded images are displayed by default in graphical Emacs.
 ;;   Use M-x bluemacs-toggle-images or press 'I' in the timeline to toggle.
 ;;   Customize `bluemacs-image-max-width' and `bluemacs-image-max-height'.
+;;
+;; Posting:
+;;   Use M-x bluemacs-compose or press 'c' in the timeline to compose a post.
+;;   In the compose buffer, press C-c C-c to send, C-c C-k to cancel.
+;;   Or use M-x bluemacs-post to post text directly from the minibuffer.
 
 ;;; Code:
 
@@ -160,7 +165,7 @@ CALLBACK is called with parsed JSON response."
      "POST"
      `((identifier . ,(car credentials))
        (password . ,(cdr credentials)))
-     (lambda (response status)
+     (lambda (response _status)
        (if (plist-get response :accessJwt)
            (progn
              (setq bluemacs-access-token (plist-get response :accessJwt)
@@ -325,13 +330,13 @@ CALLBACK is called with parsed JSON response."
   "Fetch and display Bluesky timeline."
   (interactive)
   (unless bluemacs-access-token
-    (user-error "Not logged in. Run M-x bluemacs-login first"))
+    (user-error "Not logged in.  Run M-x bluemacs-login first"))
   (message "Fetching timeline...")
   (bluemacs--make-request
    (format "/xrpc/app.bsky.feed.getTimeline?limit=%d" bluemacs-timeline-limit)
    "GET"
    nil
-   (lambda (response status)
+   (lambda (response _status)
      (let ((feed (plist-get response :feed)))
        (if feed
            (progn
@@ -356,6 +361,78 @@ CALLBACK is called with parsed JSON response."
     (message "Images only work in graphical Emacs (not terminal mode)"))
   (when (get-buffer bluemacs-timeline-buffer)
     (bluemacs-refresh-timeline)))
+
+;;; Posting
+
+(defun bluemacs--get-current-timestamp ()
+  "Get current timestamp in ISO 8601 format for AT Protocol."
+  (format-time-string "%Y-%m-%dT%H:%M:%S.000Z" (current-time) t))
+
+;;;###autoload
+(defun bluemacs-post (text)
+  "Post TEXT as a new skeet to Bluesky."
+  (interactive "sPost text: ")
+  (unless bluemacs-access-token
+    (user-error "Not logged in.  Run M-x bluemacs-login first"))
+  (when (string-empty-p (string-trim text))
+    (user-error "Post text cannot be empty"))
+  (when (> (length text) 300)
+    (user-error "Post text too long (max 300 characters, got %d)" (length text)))
+  (let ((record `((text . ,text)
+                  (createdAt . ,(bluemacs--get-current-timestamp))
+                  ($type . "app.bsky.feed.post"))))
+    (bluemacs--make-request
+     "/xrpc/com.atproto.repo.createRecord"
+     "POST"
+     `((repo . ,bluemacs-did)
+       (collection . "app.bsky.feed.post")
+       (record . ,record))
+     (lambda (response _status)
+       (if (plist-get response :uri)
+           (message "Posted successfully!")
+         (message "Failed to post: %s"
+                  (or (plist-get response :message) "Unknown error")))))))
+
+;;;###autoload
+(defun bluemacs-compose ()
+  "Compose a new post in a dedicated buffer."
+  (interactive)
+  (unless bluemacs-access-token
+    (user-error "Not logged in.  Run M-x bluemacs-login first"))
+  (let ((buffer (get-buffer-create "*Bluesky Compose*")))
+    (with-current-buffer buffer
+      (erase-buffer)
+      (text-mode)
+      (insert ";; Write your post below (max 300 characters)\n")
+      (insert ";; Press C-c C-c to post, C-c C-k to cancel\n\n")
+      (local-set-key (kbd "C-c C-c") #'bluemacs-compose-send)
+      (local-set-key (kbd "C-c C-k") #'bluemacs-compose-cancel))
+    (switch-to-buffer-other-window buffer)
+    (goto-char (point-max))))
+
+(defun bluemacs-compose-send ()
+  "Send the post from the compose buffer."
+  (interactive)
+  (let ((text (buffer-substring-no-properties
+               (save-excursion
+                 (goto-char (point-min))
+                 (forward-line 3)
+                 (point))
+               (point-max))))
+    (when (string-empty-p (string-trim text))
+      (user-error "Post text cannot be empty"))
+    (when (> (length text) 300)
+      (user-error "Post text too long (max 300 characters, got %d)" (length text)))
+    (bluemacs-post text)
+    (kill-buffer)
+    (delete-window)))
+
+(defun bluemacs-compose-cancel ()
+  "Cancel composing and close the buffer."
+  (interactive)
+  (when (yes-or-no-p "Discard post? ")
+    (kill-buffer)
+    (delete-window)))
 
 ;;; Auto-refresh
 
@@ -421,6 +498,7 @@ CALLBACK is called with parsed JSON response."
   (let ((map (make-sparse-keymap)))
     (suppress-keymap map)
     (define-key map "g" #'bluemacs-refresh-timeline)
+    (define-key map "c" #'bluemacs-compose)
     (define-key map "a" #'bluemacs-toggle-auto-refresh)
     (define-key map "i" #'bluemacs-set-refresh-interval)
     (define-key map "I" #'bluemacs-toggle-images)
