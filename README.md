@@ -1,1 +1,208 @@
 # bluemacs.el
+
+A (WIP) Bluesky client for Emacs.
+
+## Features
+
+Not many right now:
+- Authentication
+- Timeline auto-refresh
+
+## Installation
+
+### Manual Installation
+
+1. Clone this repository:
+   ```bash
+   git clone https://github.com/annapawlicka/bluemacs.el.git
+   ```
+
+2. Add to your Emacs configuration:
+   ```elisp
+   (add-to-list 'load-path "/path/to/bluemacs.el")
+   (require 'bluemacs)
+   ```
+
+### Using `use-package`
+
+```elisp
+(use-package bluemacs
+  :load-path "/path/to/bluemacs.el"
+  :config
+  (setq bluemacs-auto-refresh-interval 60)) ; Optional: auto-refresh every 60 seconds
+```
+
+## Usage
+
+### Authentication
+
+Before using bluemacs, you need to create an **App Password** (not your main Bluesky password):
+
+1. Go to https://bsky.app/settings/app-passwords
+2. Create a new app password
+3. Save it securely
+
+### First Login
+
+```elisp
+M-x bluemacs-login
+```
+
+You'll be prompted for:
+- Your Bluesky handle (e.g., `username.bsky.social`), you can also use your email
+- Your app password
+
+**Note:** Credentials are only stored in memory by default. See [Saving Credentials](#saving-credentials) to persist them.
+
+### Viewing Timeline
+
+```elisp
+M-x bluemacs-timeline
+```
+
+This opens a buffer displaying your Bluesky timeline.
+
+## Keybindings
+
+In the timeline buffer:
+
+| Key | Action                        |
+|-----|-------------------------------|
+| `g` | Refresh timeline              |
+| `a` | Toggle auto-refresh           |
+| `i` | Set refresh interval          |
+| `q` | Quit window                   |
+| `n` | Next line                     |
+| `p` | Previous line                 |
+| `?` | Describe mode (show help)     |
+| `SPC` | Scroll up                   |
+| `DEL` | Scroll down                 |
+| `<` | Beginning of buffer           |
+| `>` | End of buffer                 |
+
+## Auto-Refresh
+
+bluemacs supports automatic timeline refreshing:
+
+### Configure via Emacs settings
+
+```elisp
+;; Set auto-refresh interval (in seconds)
+(setq bluemacs-auto-refresh-interval 60)  ; Refresh every 60 seconds
+```
+
+### Configure interactively
+
+From the timeline buffer:
+- Press `i` to set the refresh interval
+- Press `a` to toggle auto-refresh on/off
+
+Or use commands:
+```elisp
+M-x bluemacs-set-refresh-interval
+M-x bluemacs-toggle-auto-refresh
+```
+
+**Note:** Auto-refresh only works when the timeline buffer is visible, so it won't waste resources in the background.
+
+## Saving Credentials
+
+By default, your password is not saved and you'll need to log in each time you restart Emacs. To save credentials securely:
+
+### Option 1: Plain text (not recommended)
+
+Create `~/.authinfo`:
+```bash
+echo "machine bsky.social login your.handle.bsky.social password your-app-password" > ~/.authinfo
+chmod 600 ~/.authinfo
+```
+
+### Option 2: Encrypted (recommended)
+
+Create `~/.authinfo.gpg` (requires GPG):
+```bash
+echo "machine bsky.social login your.handle.bsky.social password your-app-password" | gpg -c -o ~/.authinfo.gpg
+```
+
+With credentials saved, `bluemacs-login` will automatically use them without prompting.
+
+## Customization
+
+### Available Options
+
+```elisp
+;; Bluesky instance URL (default: "https://bsky.social")
+(setq bluemacs-instance "https://bsky.social")
+
+;; Number of posts to fetch (default: 10)
+(setq bluemacs-timeline-limit 20)
+
+;; Auto-refresh interval in seconds (default: nil, disabled)
+(setq bluemacs-auto-refresh-interval 120)
+```
+
+### Example Configuration
+
+```elisp
+(use-package bluemacs
+  :load-path "/path/to/bluemacs.el"
+  :custom
+  (bluemacs-timeline-limit 15)
+  (bluemacs-auto-refresh-interval 90)
+  :config
+  (message "bluemacs loaded!"))
+```
+
+## Commands
+
+| Command                           | Description                              |
+|-----------------------------------|------------------------------------------|
+| `bluemacs-login`                  | Log in to Bluesky                        |
+| `bluemacs-logout`                 | Log out from current session             |
+| `bluemacs-timeline`               | Fetch and display timeline               |
+| `bluemacs-refresh-timeline`       | Refresh the current timeline             |
+| `bluemacs-toggle-auto-refresh`    | Toggle auto-refresh on/off               |
+| `bluemacs-set-refresh-interval`   | Set auto-refresh interval                |
+
+## Requirements
+
+- Emacs 27.1 or higher
+- `json` (built-in)
+- `url` (built-in)
+- `auth-source` (built-in)
+
+## Security Notes
+
+1. **Always use App Passwords**, never your main Bluesky password
+2. **Encrypt your authinfo file** using `.authinfo.gpg` instead of plain `.authinfo`
+3. **Set proper file permissions**: `chmod 600 ~/.authinfo` or `~/.authinfo.gpg`
+4. **Access tokens are stored in memory** and are cleared when you restart Emacs or run `bluemacs-logout`
+
+## Roadmap
+
+Future features planned:
+- [ ] Compose and post new skeets
+- [ ] Reply to posts
+- [ ] Like and repost functionality
+- [ ] View user profiles
+- [ ] Thread view
+- [ ] Notifications
+- [ ] Image support
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit issues or pull requests.
+
+## License
+
+See [LICENSE](LICENSE) file for details.
+
+## Author
+
+Anna Pawlicka <hi@annapawlicka.com>
+
+## Links
+
+- Repository: https://github.com/annapawlicka/bluemacs.el
+- Bluesky: https://bsky.app
+- AT Protocol Documentation: https://atproto.com
