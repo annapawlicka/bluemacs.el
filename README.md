@@ -236,10 +236,6 @@ Contributions are welcome! Please feel free to submit issues or pull requests.
 
 See [LICENSE](LICENSE) file for details.
 
-## Author
-
-Anna Pawlicka <hi@annapawlicka.com>
-
 ## Links
 
 - Repository: https://github.com/annapawlicka/bluemacs.el
