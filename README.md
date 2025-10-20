@@ -4,9 +4,10 @@ A (WIP) Bluesky client for Emacs.
 
 ## Features
 
-Not many right now:
-- Authentication
-- Timeline auto-refresh
+- Secure authentication with Bluesky
+- Display embedded images inline (in graphical Emacs)
+- Auto-refresh timeline at configurable intervals
+- Simple keybindings
 
 ## Installation
 
@@ -71,6 +72,7 @@ In the timeline buffer:
 | `g` | Refresh timeline              |
 | `a` | Toggle auto-refresh           |
 | `i` | Set refresh interval          |
+| `I` | Toggle image display          |
 | `q` | Quit window                   |
 | `n` | Next line                     |
 | `p` | Previous line                 |
@@ -105,6 +107,36 @@ M-x bluemacs-toggle-auto-refresh
 
 **Note:** Auto-refresh only works when the timeline buffer is visible, so it won't waste resources in the background.
 
+## Images
+
+bluemacs can display embedded images inline when running in graphical Emacs.
+
+### Features
+
+- Automatic display of embedded images in posts
+- Image resizing to fit configured dimensions
+- Alt text support
+- Works only in graphical Emacs (shows alt text in terminal mode)
+
+### Usage
+
+**Toggle images on/off:**
+- Press `I` (capital i) in the timeline buffer
+- Or run `M-x bluemacs-toggle-images`
+
+**Customize image size:**
+```elisp
+(setq bluemacs-image-max-width 600)   ;; Default: 400
+(setq bluemacs-image-max-height 400)  ;; Default: 300
+```
+
+**Disable images by default:**
+```elisp
+(setq bluemacs-display-images nil)
+```
+
+**Note:** Images only display in graphical Emacs. In terminal mode, alt text is shown instead.
+
 ## Saving Credentials
 
 By default, your password is not saved and you'll need to log in each time you restart Emacs. To save credentials securely:
@@ -134,11 +166,18 @@ With credentials saved, `bluemacs-login` will automatically use them without pro
 ;; Bluesky instance URL (default: "https://bsky.social")
 (setq bluemacs-instance "https://bsky.social")
 
-;; Number of posts to fetch (default: 10)
+;; Number of posts to fetch (default: 50)
 (setq bluemacs-timeline-limit 20)
 
 ;; Auto-refresh interval in seconds (default: nil, disabled)
 (setq bluemacs-auto-refresh-interval 120)
+
+;; Display embedded images (default: t)
+(setq bluemacs-display-images t)
+
+;; Maximum image dimensions in pixels
+(setq bluemacs-image-max-width 400)
+(setq bluemacs-image-max-height 300)
 ```
 
 ### Example Configuration
@@ -163,6 +202,7 @@ With credentials saved, `bluemacs-login` will automatically use them without pro
 | `bluemacs-refresh-timeline`       | Refresh the current timeline             |
 | `bluemacs-toggle-auto-refresh`    | Toggle auto-refresh on/off               |
 | `bluemacs-set-refresh-interval`   | Set auto-refresh interval                |
+| `bluemacs-toggle-images`          | Toggle image display on/off              |
 
 ## Requirements
 
@@ -187,7 +227,6 @@ Future features planned:
 - [ ] View user profiles
 - [ ] Thread view
 - [ ] Notifications
-- [ ] Image support
 
 ## Contributing
 

@@ -23,6 +23,11 @@
 ;;   Use M-x bluemacs-set-refresh-interval to change the interval.
 ;;   Use M-x bluemacs-toggle-auto-refresh to toggle auto-refresh on/off.
 ;;   In the timeline buffer, press 'a' to toggle or 'i' to set interval.
+;;
+;; Images:
+;;   Embedded images are displayed by default in graphical Emacs.
+;;   Use M-x bluemacs-toggle-images or press 'I' in the timeline to toggle.
+;;   Customize `bluemacs-image-max-width' and `bluemacs-image-max-height'.
 
 ;;; Code:
 
@@ -42,7 +47,7 @@
   :type 'string
   :group 'bluemacs)
 
-(defcustom bluemacs-timeline-limit 10
+(defcustom bluemacs-timeline-limit 50
   "Number of posts to fetch from timeline."
   :type 'integer
   :group 'bluemacs)
@@ -53,6 +58,21 @@ If nil, auto-refresh is disabled.
 If set to a number, the timeline will automatically refresh at that interval."
   :type '(choice (const :tag "Disabled" nil)
                  (integer :tag "Seconds"))
+  :group 'bluemacs)
+
+(defcustom bluemacs-display-images t
+  "Whether to display embedded images in posts."
+  :type 'boolean
+  :group 'bluemacs)
+
+(defcustom bluemacs-image-max-width 400
+  "Maximum width for displayed images in pixels."
+  :type 'integer
+  :group 'bluemacs)
+
+(defcustom bluemacs-image-max-height 300
+  "Maximum height for displayed images in pixels."
+  :type 'integer
   :group 'bluemacs)
 
 ;;; Variables
@@ -158,6 +178,89 @@ CALLBACK is called with parsed JSON response."
         bluemacs-handle nil)
   (message "Logged out from Bluesky"))
 
+;;; Images
+
+(defun bluemacs--download-image (url)
+  "Download image from URL and return it as an Emacs image object."
+  (when (and bluemacs-display-images (display-graphic-p))
+    (condition-case err
+        (let ((buffer (url-retrieve-synchronously url t)))
+          (when buffer
+            (with-current-buffer buffer
+              (goto-char (point-min))
+              (when (re-search-forward "\n\n" nil t)
+                (let* ((image-data (buffer-substring-no-properties (point) (point-max)))
+                       (image (create-image image-data nil t)))
+                  (kill-buffer)
+                  image)))))
+      (error
+       (message "Error downloading image: %s" (error-message-string err))
+       nil))))
+
+(defun bluemacs--resize-image (image)
+  "Resize IMAGE to fit within configured dimensions."
+  (when image
+    (let* ((size (image-size image t))
+           (width (car size))
+           (height (cdr size))
+           (max-width bluemacs-image-max-width)
+           (max-height bluemacs-image-max-height)
+           (scale (min (/ (float max-width) width)
+                      (/ (float max-height) height)
+                      1.0)))
+      (when (< scale 1.0)
+        (create-image (plist-get (cdr image) :data)
+                     (plist-get (cdr image) :type)
+                     t
+                     :width (round (* width scale))
+                     :height (round (* height scale)))))))
+
+(defun bluemacs--format-embed-images (embed)
+  "Format EMBED images for display."
+  (when bluemacs-display-images
+    (let ((embed-type (plist-get embed :$type)))
+      (cond
+       ;; Handle image embeds
+       ((or (string= embed-type "app.bsky.embed.images")
+            (string= embed-type "app.bsky.embed.images#view"))
+        (let ((images (plist-get embed :images)))
+          (when images
+            (message "Found %d images" (length images))
+            (if (display-graphic-p)
+                (mapconcat
+                 (lambda (img)
+                   (let* ((thumb (plist-get img :thumb))
+                          (fullsize (plist-get img :fullsize))
+                          (url (or thumb fullsize))
+                          (alt (or (plist-get img :alt) ""))
+                          (image (when url
+                                   (message "Downloading image from: %s" url)
+                                   (bluemacs--download-image url))))
+                     (if image
+                         (progn
+                           (message "Image downloaded successfully")
+                           (let ((resized (or (bluemacs--resize-image image) image)))
+                             (concat
+                              (propertize " " 'display resized)
+                              (when (not (string-empty-p alt))
+                                (format "\n[Image: %s]" alt))
+                              "\n")))
+                       (progn
+                         (message "Failed to download image")
+                         (when (not (string-empty-p alt))
+                           (format "[Image: %s]\n" alt))))))
+                 images
+                 "")
+              ;; Terminal mode - just show alt text
+              (mapconcat
+               (lambda (img)
+                 (let ((alt (or (plist-get img :alt) "")))
+                   (if (not (string-empty-p alt))
+                       (format "[Image: %s]\n" alt)
+                     "[Image]\n")))
+               images
+               "")))))))))
+
 ;;; Timeline
 
 (defun bluemacs--format-timestamp (timestamp)
@@ -172,22 +275,28 @@ CALLBACK is called with parsed JSON response."
       (let* ((post-data (plist-get post :post))
              (record (plist-get (or post-data post) :record))
              (author (plist-get (or post-data post) :author))
+             (embed (plist-get (or post-data post) :embed))
              (author-handle (or (plist-get author :handle) "unknown"))
              (author-display (or (plist-get author :displayName) author-handle))
              (text (or (plist-get record :text) "[No text]"))
              (created-at (plist-get record :createdAt))
              (like-count (or (plist-get (or post-data post) :likeCount) 0))
              (repost-count (or (plist-get (or post-data post) :repostCount) 0))
-             (reply-count (or (plist-get (or post-data post) :replyCount) 0)))
-        (format "%s (@%s) - %s\n%s\n[replies: %d  reposts: %d  likes: %d]\n%s\n"
-                (propertize author-display 'face 'bold)
-                author-handle
-                (bluemacs--format-timestamp created-at)
-                text
-                reply-count
-                repost-count
-                like-count
-                (make-string 80 ?-)))
+             (reply-count (or (plist-get (or post-data post) :replyCount) 0))
+             (images (bluemacs--format-embed-images embed)))
+        (concat
+         (format "%s (@%s) - %s\n%s\n"
+                 (propertize author-display 'face 'bold)
+                 author-handle
+                 (bluemacs--format-timestamp created-at)
+                 text)
+         (when images
+           (concat images "\n"))
+         (format "[replies: %d  reposts: %d  likes: %d]\n%s\n"
+                 reply-count
+                 repost-count
+                 like-count
+                 (make-string 80 ?-))))
     (error
      (message "Error formatting post: %s" (error-message-string err))
      (format "[Error displaying post: %s]\n%s\n"
@@ -225,7 +334,9 @@ CALLBACK is called with parsed JSON response."
    (lambda (response status)
      (let ((feed (plist-get response :feed)))
        (if feed
-           (bluemacs--display-timeline feed)
+           (progn
+             (bluemacs--display-timeline feed)
+             (message "Timeline fetched: %d posts" (length feed)))
          (message "Failed to fetch timeline: %s"
                   (or (plist-get response :message) "Unknown error")))))))
 
@@ -234,6 +345,17 @@ CALLBACK is called with parsed JSON response."
   "Refresh the current timeline."
   (interactive)
   (bluemacs-timeline))
+
+;;;###autoload
+(defun bluemacs-toggle-images ()
+  "Toggle display of embedded images."
+  (interactive)
+  (setq bluemacs-display-images (not bluemacs-display-images))
+  (if (display-graphic-p)
+      (message "Image display %s" (if bluemacs-display-images "enabled" "disabled"))
+    (message "Images only work in graphical Emacs (not terminal mode)"))
+  (when (get-buffer bluemacs-timeline-buffer)
+    (bluemacs-refresh-timeline)))
 
 ;;; Auto-refresh
 
@@ -301,6 +423,7 @@ CALLBACK is called with parsed JSON response."
     (define-key map "g" #'bluemacs-refresh-timeline)
     (define-key map "a" #'bluemacs-toggle-auto-refresh)
     (define-key map "i" #'bluemacs-set-refresh-interval)
+    (define-key map "I" #'bluemacs-toggle-images)
     (define-key map "q" #'quit-window)
     (define-key map "n" #'next-line)
     (define-key map "p" #'previous-line)
