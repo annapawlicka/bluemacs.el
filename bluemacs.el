@@ -91,9 +91,12 @@ CALLBACK is called with parsed JSON response."
      (lambda (status)
        (condition-case err
            (progn
+             (set-buffer-multibyte t)
              (goto-char (point-min))
              (when (re-search-forward "\n\n" nil t)
-               (let* ((response-body (buffer-substring-no-properties (point) (point-max)))
+               (let* ((response-body (decode-coding-string
+                                      (buffer-substring (point) (point-max))
+                                      'utf-8))
                       (json-object-type 'plist)
                       (json-array-type 'list)
                       (json-key-type 'keyword)
@@ -179,6 +182,8 @@ CALLBACK is called with parsed JSON response."
   (with-current-buffer (get-buffer-create bluemacs-timeline-buffer)
     (let ((inhibit-read-only t))
       (erase-buffer)
+      (set-buffer-multibyte t)
+      (setq buffer-file-coding-system 'utf-8)
       (insert (propertize (format "Bluesky Timeline (@%s)\n" bluemacs-handle)
                           'face '(:height 1.5 :weight bold))
               (make-string 80 ?=)
