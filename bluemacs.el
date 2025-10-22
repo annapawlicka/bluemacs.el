@@ -38,6 +38,10 @@
 ;;   Press 't' on any post to view its thread with all replies.
 ;;   Replies are indented to show conversation hierarchy.  Press 'b' to go
 ;;   back to Timeline.
+;;
+;; Replying to a post:
+;;   Use 'r' on any post to open compose buffer.  In the compose buffer, press
+;;   C-c C-c to send, C-c C-k to cancel.
 
 ;;; Code:
 
@@ -101,6 +105,9 @@ If set to a number, the timeline will automatically refresh at that interval."
 
 (defvar bluemacs-refresh-timer nil
   "Timer object for auto-refreshing timeline.")
+
+(defvar-local bluemacs-reply-data nil
+  "Buffer-local variable storing reply data (parent post info).")
 
 ;;; Authentication
 
@@ -337,9 +344,10 @@ links, mentions, and other rich text features."
                                         'help-echo uri)))))))))
       (buffer-substring (point-min) (point-max)))))
 
-(defun bluemacs--format-post (post &optional indent-level)
+(defun bluemacs--format-post (post &optional indent-level root-uri root-cid)
   "Format a single POST for display.
-INDENT-LEVEL determines indentation for nested replies (default 0)."
+INDENT-LEVEL determines indentation for nested replies (default 0).
+ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
   (condition-case err
       (let* ((indent-level (or indent-level 0))
              (indent-str (make-string (* indent-level 2) ?\s))
@@ -370,14 +378,44 @@ INDENT-LEVEL determines indentation for nested replies (default 0)."
                                   like-count
                                   (if (> reply-count 0) " - press 't' to view thread" "")
                                   indent-str
-                                  (make-string 80 ?-))))
+                                  (make-string 80 ?-)))
+             (cid (plist-get (or post-data post) :cid))
+             (author-did (plist-get author :did))
+             ;; For top-level posts, this post is the root. For replies, use provided root.
+             (actual-root-uri (or root-uri uri))
+             (actual-root-cid (or root-cid cid)))
         (concat
-         (propertize indent-str 'bluemacs-post-uri uri)
-         (propertize post-header 'bluemacs-post-uri uri)
-         (propertize formatted-text 'bluemacs-post-uri uri)
+         (propertize indent-str
+                     'bluemacs-post-uri uri
+                     'bluemacs-post-cid cid
+                     'bluemacs-post-author-did author-did
+                     'bluemacs-root-uri actual-root-uri
+                     'bluemacs-root-cid actual-root-cid)
+         (propertize post-header
+                     'bluemacs-post-uri uri
+                     'bluemacs-post-cid cid
+                     'bluemacs-post-author-did author-did
+                     'bluemacs-root-uri actual-root-uri
+                     'bluemacs-root-cid actual-root-cid)
+         (propertize formatted-text
+                     'bluemacs-post-uri uri
+                     'bluemacs-post-cid cid
+                     'bluemacs-post-author-did author-did
+                     'bluemacs-root-uri actual-root-uri
+                     'bluemacs-root-cid actual-root-cid)
          (when images
-           (propertize (concat "\n" indent-str images) 'bluemacs-post-uri uri))
-         (propertize post-footer 'bluemacs-post-uri uri)))
+           (propertize (concat "\n" indent-str images)
+                       'bluemacs-post-uri uri
+                       'bluemacs-post-cid cid
+                       'bluemacs-post-author-did author-did
+                       'bluemacs-root-uri actual-root-uri
+                       'bluemacs-root-cid actual-root-cid))
+         (propertize post-footer
+                     'bluemacs-post-uri uri
+                     'bluemacs-post-cid cid
+                     'bluemacs-post-author-did author-did
+                     'bluemacs-root-uri actual-root-uri
+                     'bluemacs-root-cid actual-root-cid)))
     (error
      (message "Error formatting post: %s" (error-message-string err))
      (format "[Error displaying post: %s]\n%s\n"
@@ -444,6 +482,20 @@ INDENT-LEVEL determines indentation for nested replies (default 0)."
   "Get the post URI at point."
   (get-text-property (point) 'bluemacs-post-uri))
 
+(defun bluemacs--get-post-data-at-point ()
+  "Get the post data (URI, CID, author DID, root info) at point for replying."
+  (let ((uri (get-text-property (point) 'bluemacs-post-uri))
+        (cid (get-text-property (point) 'bluemacs-post-cid))
+        (author-did (get-text-property (point) 'bluemacs-post-author-did))
+        (root-uri (get-text-property (point) 'bluemacs-root-uri))
+        (root-cid (get-text-property (point) 'bluemacs-root-cid)))
+    (when (and uri cid author-did)
+      (list :uri uri
+            :cid cid
+            :author-did author-did
+            :root-uri (or root-uri uri)  ;; If no root, this post is the root
+            :root-cid (or root-cid cid)))))
+
 ;;;###autoload
 (defun bluemacs-view-thread ()
   "View the thread/replies for the post at point."
@@ -484,18 +536,24 @@ INDENT-LEVEL determines indentation for nested replies (default 0)."
       (switch-to-buffer (current-buffer)))
     (message "Thread loaded")))
 
-(defun bluemacs--insert-thread (thread indent-level)
-  "Insert THREAD with INDENT-LEVEL into current buffer."
+(defun bluemacs--insert-thread (thread indent-level &optional root-uri root-cid)
+  "Insert THREAD with INDENT-LEVEL into current buffer.
+ROOT-URI and ROOT-CID identify the root post of the thread."
   (when thread
     (let* ((post (plist-get thread :post))
-           (replies (plist-get thread :replies)))
+           (replies (plist-get thread :replies))
+           (uri (plist-get post :uri))
+           (cid (plist-get post :cid))
+           ;; First post in thread is the root
+           (actual-root-uri (or root-uri uri))
+           (actual-root-cid (or root-cid cid)))
       ;; Insert the main post
       (when post
-        (insert (bluemacs--format-post (list :post post) indent-level)))
-      ;; Insert replies recursively
+        (insert (bluemacs--format-post (list :post post) indent-level actual-root-uri actual-root-cid)))
+      ;; Insert replies recursively, passing down the root
       (when replies
         (dolist (reply replies)
-          (bluemacs--insert-thread reply (1+ indent-level)))))))
+          (bluemacs--insert-thread reply (1+ indent-level) actual-root-uri actual-root-cid))))))
 
 ;;;###autoload
 (defun bluemacs-back-to-timeline ()
@@ -517,8 +575,10 @@ INDENT-LEVEL determines indentation for nested replies (default 0)."
   (format-time-string "%Y-%m-%dT%H:%M:%S.000Z" (current-time) t))
 
 ;;;###autoload
-(defun bluemacs-post (text)
-  "Post TEXT as a new skeet to Bluesky."
+(defun bluemacs-post (text &optional reply-to)
+  "Post TEXT as a new skeet to Bluesky.
+If REPLY-TO is provided, post as a reply to that post.
+REPLY-TO should be a plist with :uri, :cid, and :author-did."
   (interactive "sPost text: ")
   (unless bluemacs-access-token
     (user-error "Not logged in.  Run M-x bluemacs-login first"))
@@ -526,9 +586,15 @@ INDENT-LEVEL determines indentation for nested replies (default 0)."
     (user-error "Post text cannot be empty"))
   (when (> (length text) 300)
     (user-error "Post text too long (max 300 characters, got %d)" (length text)))
-  (let ((record `((text . ,text)
-                  (createdAt . ,(bluemacs--get-current-timestamp))
-                  ($type . "app.bsky.feed.post"))))
+  (let* ((reply-ref (when reply-to
+                      `((root . ((uri . ,(plist-get reply-to :root-uri))
+                                 (cid . ,(plist-get reply-to :root-cid))))
+                        (parent . ((uri . ,(plist-get reply-to :uri))
+                                   (cid . ,(plist-get reply-to :cid)))))))
+         (record `((text . ,text)
+                   (createdAt . ,(bluemacs--get-current-timestamp))
+                   ($type . "app.bsky.feed.post")
+                   ,@(when reply-ref `((reply . ,reply-ref))))))
     (bluemacs--make-request
      "/xrpc/com.atproto.repo.createRecord"
      "POST"
@@ -579,6 +645,49 @@ INDENT-LEVEL determines indentation for nested replies (default 0)."
   "Cancel composing and close the buffer."
   (interactive)
   (when (yes-or-no-p "Discard post? ")
+    (kill-buffer)
+    (delete-window)))
+
+;;;###autoload
+(defun bluemacs-reply ()
+  "Compose a reply to the post at point."
+  (interactive)
+  (unless bluemacs-access-token
+    (user-error "Not logged in.  Run M-x bluemacs-login first"))
+  (let ((post-data (bluemacs--get-post-data-at-point)))
+    (unless post-data
+      (user-error "No post at point to reply to"))
+    (let ((buffer (get-buffer-create "*Bluesky Reply*")))
+      (with-current-buffer buffer
+        (erase-buffer)
+        (text-mode)
+        (insert ";; Write your reply below (max 300 characters)\n")
+        (insert (format ";; Replying to post: %s\n" (plist-get post-data :uri)))
+        (insert ";; Press C-c C-c to post, C-c C-k to cancel\n\n")
+        ;; Store reply data as buffer-local variable
+        (setq-local bluemacs-reply-data post-data)
+        (local-set-key (kbd "C-c C-c") #'bluemacs-reply-send)
+        (local-set-key (kbd "C-c C-k") #'bluemacs-compose-cancel))
+      (switch-to-buffer-other-window buffer)
+      (goto-char (point-max)))))
+
+(defun bluemacs-reply-send ()
+  "Send the reply from the compose buffer."
+  (interactive)
+  (unless (boundp 'bluemacs-reply-data)
+    (user-error "No reply data found.  Use bluemacs-reply to compose a reply"))
+  (let ((text (buffer-substring-no-properties
+               (save-excursion
+                 (goto-char (point-min))
+                 (forward-line 4)
+                 (point))
+               (point-max)))
+        (reply-data bluemacs-reply-data))
+    (when (string-empty-p (string-trim text))
+      (user-error "Reply text cannot be empty"))
+    (when (> (length text) 300)
+      (user-error "Reply text too long (max 300 characters, got %d)" (length text)))
+    (bluemacs-post text reply-data)
     (kill-buffer)
     (delete-window)))
 
@@ -647,6 +756,7 @@ INDENT-LEVEL determines indentation for nested replies (default 0)."
     (suppress-keymap map)
     (define-key map "g" #'bluemacs-refresh-timeline)
     (define-key map "c" #'bluemacs-compose)
+    (define-key map "r" #'bluemacs-reply)
     (define-key map "t" #'bluemacs-view-thread)
     (define-key map "b" #'bluemacs-back-to-timeline)
     (define-key map "a" #'bluemacs-toggle-auto-refresh)

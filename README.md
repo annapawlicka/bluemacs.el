@@ -8,7 +8,9 @@ A (WIP) Bluesky client for Emacs.
 - View your timeline with UTF-8 support (including emojis)
 - Display embedded images inline (in graphical Emacs)
 - Compose and post text updates
+- Reply to posts with proper threading
 - View conversation threads with replies
+- Clickable links in posts
 - Auto-refresh timeline at configurable intervals
 - Simple keybindings
 
@@ -74,6 +76,7 @@ In the timeline buffer:
 |-----|-------------------------------|
 | `g` | Refresh timeline              |
 | `c` | Compose new post              |
+| `r` | Reply to post at point        |
 | `t` | View thread/replies           |
 | `b` | Back to timeline              |
 | `a` | Toggle auto-refresh           |
@@ -132,6 +135,21 @@ Post text: Your message here RET
 ```
 
 **Note:** Posts are limited to 300 characters. The package will validate length before posting.
+
+## Replying to Posts
+
+Reply to any post in your timeline or in thread view:
+
+1. Navigate to the post you want to reply to
+2. Press `r` (or run `M-x bluemacs-reply`)
+3. A compose buffer opens showing which post you're replying to
+4. Write your reply (max 300 characters)
+5. Press `C-c C-c` to send or `C-c C-k` to cancel
+
+**Features:**
+- Replies maintain proper thread structure with parent/root references
+- Works in both timeline and thread views
+- Reply buffer shows the URI of the post you're replying to
 
 ## Viewing Threads
 
@@ -242,6 +260,7 @@ With credentials saved, `bluemacs-login` will automatically use them without pro
 | `bluemacs-refresh-timeline`       | Refresh the current timeline             |
 | `bluemacs-compose`                | Compose a new post in buffer             |
 | `bluemacs-post`                   | Post text from minibuffer                |
+| `bluemacs-reply`                  | Reply to post at point                   |
 | `bluemacs-view-thread`            | View thread/replies for post at point    |
 | `bluemacs-back-to-timeline`       | Return to timeline from thread view      |
 | `bluemacs-toggle-auto-refresh`    | Toggle auto-refresh on/off               |
@@ -267,9 +286,9 @@ With credentials saved, `bluemacs-login` will automatically use them without pro
 Completed features:
 - [x] Compose and post new text skeets
 - [x] Thread view
+- [x] Reply to posts
 
 Future features planned:
-- [ ] Reply to posts
 - [ ] Like and repost functionality
 - [ ] View user profiles
 - [ ] Notifications
