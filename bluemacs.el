@@ -364,6 +364,9 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
              (like-count (or (plist-get (or post-data post) :likeCount) 0))
              (repost-count (or (plist-get (or post-data post) :repostCount) 0))
              (reply-count (or (plist-get (or post-data post) :replyCount) 0))
+             (viewer (plist-get (or post-data post) :viewer))
+             (like-uri (when viewer (plist-get viewer :like)))
+             (liked (not (null like-uri)))
              (images (bluemacs--format-embed-images embed))
              (formatted-text (bluemacs--buttonize-with-facets text facets))
              (post-header (format "%s (@%s) - %s\n%s"
@@ -371,11 +374,12 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
                                   author-handle
                                   (bluemacs--format-timestamp created-at)
                                   indent-str))
-             (post-footer (format "\n%s[replies: %d  reposts: %d  likes: %d]%s\n%s%s\n"
+             (post-footer (format "\n%s[replies: %d  reposts: %d  likes: %d%s]%s\n%s%s\n"
                                   indent-str
                                   reply-count
                                   repost-count
                                   like-count
+                                  (if liked " ♥" "")
                                   (if (> reply-count 0) " - press 't' to view thread" "")
                                   indent-str
                                   (make-string 80 ?-)))
@@ -390,32 +394,37 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
                      'bluemacs-post-cid cid
                      'bluemacs-post-author-did author-did
                      'bluemacs-root-uri actual-root-uri
-                     'bluemacs-root-cid actual-root-cid)
+                     'bluemacs-root-cid actual-root-cid
+                     'bluemacs-like-uri like-uri)
          (propertize post-header
                      'bluemacs-post-uri uri
                      'bluemacs-post-cid cid
                      'bluemacs-post-author-did author-did
                      'bluemacs-root-uri actual-root-uri
-                     'bluemacs-root-cid actual-root-cid)
+                     'bluemacs-root-cid actual-root-cid
+                     'bluemacs-like-uri like-uri)
          (propertize formatted-text
                      'bluemacs-post-uri uri
                      'bluemacs-post-cid cid
                      'bluemacs-post-author-did author-did
                      'bluemacs-root-uri actual-root-uri
-                     'bluemacs-root-cid actual-root-cid)
+                     'bluemacs-root-cid actual-root-cid
+                     'bluemacs-like-uri like-uri)
          (when images
            (propertize (concat "\n" indent-str images)
                        'bluemacs-post-uri uri
                        'bluemacs-post-cid cid
                        'bluemacs-post-author-did author-did
                        'bluemacs-root-uri actual-root-uri
-                       'bluemacs-root-cid actual-root-cid))
+                       'bluemacs-root-cid actual-root-cid
+                       'bluemacs-like-uri like-uri))
          (propertize post-footer
                      'bluemacs-post-uri uri
                      'bluemacs-post-cid cid
                      'bluemacs-post-author-did author-did
                      'bluemacs-root-uri actual-root-uri
-                     'bluemacs-root-cid actual-root-cid)))
+                     'bluemacs-root-cid actual-root-cid
+                     'bluemacs-like-uri like-uri)))
     (error
      (message "Error formatting post: %s" (error-message-string err))
      (format "[Error displaying post: %s]\n%s\n"
@@ -691,6 +700,64 @@ REPLY-TO should be a plist with :uri, :cid, and :author-did."
     (kill-buffer)
     (delete-window)))
 
+;;; Liking
+
+;;;###autoload
+(defun bluemacs-toggle-like ()
+  "Like or unlike the post at point."
+  (interactive)
+  (unless bluemacs-access-token
+    (user-error "Not logged in.  Run M-x bluemacs-login first"))
+  (let ((uri (get-text-property (point) 'bluemacs-post-uri))
+        (cid (get-text-property (point) 'bluemacs-post-cid))
+        (like-uri (get-text-property (point) 'bluemacs-like-uri)))
+    (unless (and uri cid)
+      (user-error "No post at point"))
+    (if like-uri
+        ;; Unlike: delete the like record
+        (bluemacs--unlike-post like-uri)
+      ;; Like: create a like record
+      (bluemacs--like-post uri cid))))
+
+(defun bluemacs--like-post (post-uri post-cid)
+  "Create a like for the post identified by POST-URI and POST-CID."
+  (let ((record `((subject . ((uri . ,post-uri)
+                              (cid . ,post-cid)))
+                  (createdAt . ,(bluemacs--get-current-timestamp))
+                  ($type . "app.bsky.feed.like"))))
+    (bluemacs--make-request
+     "/xrpc/com.atproto.repo.createRecord"
+     "POST"
+     `((repo . ,bluemacs-did)
+       (collection . "app.bsky.feed.like")
+       (record . ,record))
+     (lambda (response _status)
+       (if (plist-get response :uri)
+           (progn
+             (message "Liked!")
+             (bluemacs-refresh-timeline))
+         (message "Failed to like: %s"
+                  (or (plist-get response :message) "Unknown error")))))))
+
+(defun bluemacs--unlike-post (like-uri)
+  "Delete the like record identified by LIKE-URI."
+  ;; Parse the like URI to extract repo and rkey
+  ;; URI format: at://did:plc:xxx/app.bsky.feed.like/rkey
+  (if (string-match "at://\\([^/]+\\)/app\\.bsky\\.feed\\.like/\\(.+\\)" like-uri)
+      (let ((repo (match-string 1 like-uri))
+            (rkey (match-string 2 like-uri)))
+        (bluemacs--make-request
+         "/xrpc/com.atproto.repo.deleteRecord"
+         "POST"
+         `((repo . ,repo)
+           (collection . "app.bsky.feed.like")
+           (rkey . ,rkey))
+         (lambda (_response _status)
+           ;; deleteRecord returns empty response on success
+           (message "Unliked!")
+           (bluemacs-refresh-timeline))))
+    (message "Invalid like URI format: %s" like-uri)))
+
 ;;; Auto-refresh
 
 (declare-function bluemacs-timeline "bluemacs")
@@ -757,6 +824,7 @@ REPLY-TO should be a plist with :uri, :cid, and :author-did."
     (define-key map "g" #'bluemacs-refresh-timeline)
     (define-key map "c" #'bluemacs-compose)
     (define-key map "r" #'bluemacs-reply)
+    (define-key map "l" #'bluemacs-toggle-like)
     (define-key map "t" #'bluemacs-view-thread)
     (define-key map "b" #'bluemacs-back-to-timeline)
     (define-key map "a" #'bluemacs-toggle-auto-refresh)

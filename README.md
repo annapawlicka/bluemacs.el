@@ -9,6 +9,7 @@ A (WIP) Bluesky client for Emacs.
 - Display embedded images inline (in graphical Emacs)
 - Compose and post text updates
 - Reply to posts with proper threading
+- Like and unlike posts
 - View conversation threads with replies
 - Clickable links in posts
 - Auto-refresh timeline at configurable intervals
@@ -77,6 +78,7 @@ In the timeline buffer:
 | `g` | Refresh timeline              |
 | `c` | Compose new post              |
 | `r` | Reply to post at point        |
+| `l` | Like/unlike post at point     |
 | `t` | View thread/replies           |
 | `b` | Back to timeline              |
 | `a` | Toggle auto-refresh           |
@@ -164,6 +166,14 @@ View conversation threads with all replies:
 - Fetches up to 10 levels of nested replies
 - 2-space indentation per reply level
 - Shows reply counts and hints when posts have replies
+
+## Liking Posts
+
+Like or unlike any post with a single keypress:
+
+1. Navigate to the post you want to like
+2. Press `l` (or run `M-x bluemacs-toggle-like`)
+3. The timeline refreshes to show the updated like status
 
 ## Images
 
@@ -261,6 +271,7 @@ With credentials saved, `bluemacs-login` will automatically use them without pro
 | `bluemacs-compose`                | Compose a new post in buffer             |
 | `bluemacs-post`                   | Post text from minibuffer                |
 | `bluemacs-reply`                  | Reply to post at point                   |
+| `bluemacs-toggle-like`            | Like or unlike post at point             |
 | `bluemacs-view-thread`            | View thread/replies for post at point    |
 | `bluemacs-back-to-timeline`       | Return to timeline from thread view      |
 | `bluemacs-toggle-auto-refresh`    | Toggle auto-refresh on/off               |
@@ -287,9 +298,10 @@ Completed features:
 - [x] Compose and post new text skeets
 - [x] Thread view
 - [x] Reply to posts
+- [x] Like posts
 
 Future features planned:
-- [ ] Like and repost functionality
+- [ ] Repost functionality
 - [ ] View user profiles
 - [ ] Notifications
 
