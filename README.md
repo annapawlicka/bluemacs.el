@@ -10,6 +10,7 @@ A (WIP) Bluesky client for Emacs.
 - Compose and post text updates
 - Reply to posts with proper threading
 - Like and unlike posts
+- Repost and unrepost posts
 - View conversation threads with replies
 - Clickable links in posts
 - Auto-refresh timeline at configurable intervals
@@ -79,6 +80,7 @@ In the timeline buffer:
 | `c` | Compose new post              |
 | `r` | Reply to post at point        |
 | `l` | Like/unlike post at point     |
+| `R` | Repost/unrepost post at point |
 | `t` | View thread/replies           |
 | `b` | Back to timeline              |
 | `a` | Toggle auto-refresh           |
@@ -174,6 +176,22 @@ Like or unlike any post with a single keypress:
 1. Navigate to the post you want to like
 2. Press `l` (or run `M-x bluemacs-toggle-like`)
 3. The timeline refreshes to show the updated like status
+
+**Features:**
+- Posts you've liked show a ♥ symbol in the stats line
+- Works in both timeline and thread views
+
+## Reposting
+
+Repost (boost/retweet) any post to share it with your followers:
+
+1. Navigate to the post you want to repost
+2. Press `R` (shift+r, or run `M-x bluemacs-toggle-repost`)
+3. The timeline refreshes to show the updated repost status
+
+**Features:**
+- Posts you've reposted show a ♻ symbol in the stats line
+- Works in both timeline and thread views
 
 ## Images
 
@@ -272,6 +290,7 @@ With credentials saved, `bluemacs-login` will automatically use them without pro
 | `bluemacs-post`                   | Post text from minibuffer                |
 | `bluemacs-reply`                  | Reply to post at point                   |
 | `bluemacs-toggle-like`            | Like or unlike post at point             |
+| `bluemacs-toggle-repost`          | Repost or unrepost post at point         |
 | `bluemacs-view-thread`            | View thread/replies for post at point    |
 | `bluemacs-back-to-timeline`       | Return to timeline from thread view      |
 | `bluemacs-toggle-auto-refresh`    | Toggle auto-refresh on/off               |
@@ -299,11 +318,12 @@ Completed features:
 - [x] Thread view
 - [x] Reply to posts
 - [x] Like posts
+- [x] Repost posts
 
 Future features planned:
-- [ ] Repost functionality
 - [ ] View user profiles
 - [ ] Notifications
+- [ ] Quote posts
 
 ## Contributing
 

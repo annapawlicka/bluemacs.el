@@ -367,6 +367,8 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
              (viewer (plist-get (or post-data post) :viewer))
              (like-uri (when viewer (plist-get viewer :like)))
              (liked (not (null like-uri)))
+             (repost-uri (when viewer (plist-get viewer :repost)))
+             (reposted (not (null repost-uri)))
              (images (bluemacs--format-embed-images embed))
              (formatted-text (bluemacs--buttonize-with-facets text facets))
              (post-header (format "%s (@%s) - %s\n%s"
@@ -374,10 +376,11 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
                                   author-handle
                                   (bluemacs--format-timestamp created-at)
                                   indent-str))
-             (post-footer (format "\n%s[replies: %d  reposts: %d  likes: %d%s]%s\n%s%s\n"
+             (post-footer (format "\n%s[replies: %d  reposts: %d%s  likes: %d%s]%s\n%s%s\n"
                                   indent-str
                                   reply-count
                                   repost-count
+                                  (if reposted " ♻" "")
                                   like-count
                                   (if liked " ♥" "")
                                   (if (> reply-count 0) " - press 't' to view thread" "")
@@ -395,21 +398,24 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
                      'bluemacs-post-author-did author-did
                      'bluemacs-root-uri actual-root-uri
                      'bluemacs-root-cid actual-root-cid
-                     'bluemacs-like-uri like-uri)
+                     'bluemacs-like-uri like-uri
+                     'bluemacs-repost-uri repost-uri)
          (propertize post-header
                      'bluemacs-post-uri uri
                      'bluemacs-post-cid cid
                      'bluemacs-post-author-did author-did
                      'bluemacs-root-uri actual-root-uri
                      'bluemacs-root-cid actual-root-cid
-                     'bluemacs-like-uri like-uri)
+                     'bluemacs-like-uri like-uri
+                     'bluemacs-repost-uri repost-uri)
          (propertize formatted-text
                      'bluemacs-post-uri uri
                      'bluemacs-post-cid cid
                      'bluemacs-post-author-did author-did
                      'bluemacs-root-uri actual-root-uri
                      'bluemacs-root-cid actual-root-cid
-                     'bluemacs-like-uri like-uri)
+                     'bluemacs-like-uri like-uri
+                     'bluemacs-repost-uri repost-uri)
          (when images
            (propertize (concat "\n" indent-str images)
                        'bluemacs-post-uri uri
@@ -417,14 +423,16 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
                        'bluemacs-post-author-did author-did
                        'bluemacs-root-uri actual-root-uri
                        'bluemacs-root-cid actual-root-cid
-                       'bluemacs-like-uri like-uri))
+                       'bluemacs-like-uri like-uri
+                       'bluemacs-repost-uri repost-uri))
          (propertize post-footer
                      'bluemacs-post-uri uri
                      'bluemacs-post-cid cid
                      'bluemacs-post-author-did author-did
                      'bluemacs-root-uri actual-root-uri
                      'bluemacs-root-cid actual-root-cid
-                     'bluemacs-like-uri like-uri)))
+                     'bluemacs-like-uri like-uri
+                     'bluemacs-repost-uri repost-uri)))
     (error
      (message "Error formatting post: %s" (error-message-string err))
      (format "[Error displaying post: %s]\n%s\n"
@@ -758,6 +766,64 @@ REPLY-TO should be a plist with :uri, :cid, and :author-did."
            (bluemacs-refresh-timeline))))
     (message "Invalid like URI format: %s" like-uri)))
 
+;;; Reposting
+
+;;;###autoload
+(defun bluemacs-toggle-repost ()
+  "Repost or unrepost the post at point."
+  (interactive)
+  (unless bluemacs-access-token
+    (user-error "Not logged in.  Run M-x bluemacs-login first"))
+  (let ((uri (get-text-property (point) 'bluemacs-post-uri))
+        (cid (get-text-property (point) 'bluemacs-post-cid))
+        (repost-uri (get-text-property (point) 'bluemacs-repost-uri)))
+    (unless (and uri cid)
+      (user-error "No post at point"))
+    (if repost-uri
+        ;; Unrepost: delete the repost record
+        (bluemacs--unrepost-post repost-uri)
+      ;; Repost: create a repost record
+      (bluemacs--repost-post uri cid))))
+
+(defun bluemacs--repost-post (post-uri post-cid)
+  "Create a repost for the post identified by POST-URI and POST-CID."
+  (let ((record `((subject . ((uri . ,post-uri)
+                              (cid . ,post-cid)))
+                  (createdAt . ,(bluemacs--get-current-timestamp))
+                  ($type . "app.bsky.feed.repost"))))
+    (bluemacs--make-request
+     "/xrpc/com.atproto.repo.createRecord"
+     "POST"
+     `((repo . ,bluemacs-did)
+       (collection . "app.bsky.feed.repost")
+       (record . ,record))
+     (lambda (response _status)
+       (if (plist-get response :uri)
+           (progn
+             (message "Reposted!")
+             (bluemacs-refresh-timeline))
+         (message "Failed to repost: %s"
+                  (or (plist-get response :message) "Unknown error")))))))
+
+(defun bluemacs--unrepost-post (repost-uri)
+  "Delete the repost record identified by REPOST-URI."
+  ;; Parse the repost URI to extract repo and rkey
+  ;; URI format: at://did:plc:xxx/app.bsky.feed.repost/rkey
+  (if (string-match "at://\\([^/]+\\)/app\\.bsky\\.feed\\.repost/\\(.+\\)" repost-uri)
+      (let ((repo (match-string 1 repost-uri))
+            (rkey (match-string 2 repost-uri)))
+        (bluemacs--make-request
+         "/xrpc/com.atproto.repo.deleteRecord"
+         "POST"
+         `((repo . ,repo)
+           (collection . "app.bsky.feed.repost")
+           (rkey . ,rkey))
+         (lambda (_response _status)
+           ;; deleteRecord returns empty response on success
+           (message "Unreposted!")
+           (bluemacs-refresh-timeline))))
+    (message "Invalid repost URI format: %s" repost-uri)))
+
 ;;; Auto-refresh
 
 (declare-function bluemacs-timeline "bluemacs")
@@ -825,6 +891,7 @@ REPLY-TO should be a plist with :uri, :cid, and :author-did."
     (define-key map "c" #'bluemacs-compose)
     (define-key map "r" #'bluemacs-reply)
     (define-key map "l" #'bluemacs-toggle-like)
+    (define-key map "R" #'bluemacs-toggle-repost)
     (define-key map "t" #'bluemacs-view-thread)
     (define-key map "b" #'bluemacs-back-to-timeline)
     (define-key map "a" #'bluemacs-toggle-auto-refresh)
