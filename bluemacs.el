@@ -232,6 +232,50 @@ CALLBACK is called with parsed JSON response."
                      :width (round (* width scale))
                      :height (round (* height scale)))))))
 
+(defun bluemacs--format-quoted-post (quoted-post indent-str)
+  "Format a QUOTED-POST for display with INDENT-STR."
+  ;; The quoted-post can have different structures:
+  ;; - Direct record with :author, :value (post data)
+  ;; - Or wrapped in :$type "app.bsky.embed.record#viewRecord"
+  (let* (;; For viewRecord type, data is directly on quoted-post with :author and :value
+         (author (plist-get quoted-post :author))
+         (uri (plist-get quoted-post :uri))  ;; URI of the quoted post
+         (cid (plist-get quoted-post :cid))  ;; CID of the quoted post
+         (value (plist-get quoted-post :value))  ;; The actual post record
+         (author-handle (or (plist-get author :handle) "unknown"))
+         (author-display (or (plist-get author :displayName) author-handle))
+         (text (or (plist-get value :text) "[No text]"))
+         (facets (plist-get value :facets))
+         (embeds-data (plist-get value :embed))  ;; Embeds within the quoted post
+         (formatted-text (bluemacs--buttonize-with-facets text facets))
+         (quoted-embeds (when embeds-data
+                          (bluemacs--format-embeds embeds-data (concat indent-str "│ ")))))
+    (propertize
+     (concat
+      indent-str
+      "┌─ Quoted Post ─────────────────────────────────────────────────\n"
+      indent-str
+      "│ "
+      (format "%s (@%s)" author-display author-handle)
+      (when uri " - [press RET to view thread]")
+      "\n"
+      indent-str
+      "│ "
+      formatted-text
+      "\n"
+      (when quoted-embeds
+        (concat quoted-embeds "\n"))
+      indent-str
+      "└───────────────────────────────────────────────────────────────\n")
+     'face '(:foreground "gray")
+     'bluemacs-quoted-post-uri uri
+     'bluemacs-quoted-post-cid cid
+     'keymap (let ((map (make-sparse-keymap)))
+               (define-key map (kbd "RET") #'bluemacs-view-quoted-post)
+               map)
+     'mouse-face 'highlight
+     'help-echo "Press RET to view this quoted post's thread")))
+
 (defun bluemacs--format-embed-images (embed)
   "Format EMBED images for display."
   (when bluemacs-display-images
@@ -277,6 +321,50 @@ CALLBACK is called with parsed JSON response."
                      "[Image]\n")))
                images
                "")))))))))
+
+(defun bluemacs--format-embeds (embed indent-str)
+  "Format EMBED for display with INDENT-STR.
+Handles both image embeds and quote post (record) embeds."
+  (when embed
+    (let ((embed-type (plist-get embed :$type)))
+      (cond
+       ;; Quote post (record embed)
+       ((or (string= embed-type "app.bsky.embed.record")
+            (string= embed-type "app.bsky.embed.record#view"))
+        (let ((record (plist-get embed :record)))
+          (when record
+            (bluemacs--format-quoted-post record indent-str))))
+
+       ;; Record with media (quote post with images)
+       ((or (string= embed-type "app.bsky.embed.recordWithMedia")
+            (string= embed-type "app.bsky.embed.recordWithMedia#view"))
+        (let ((record (plist-get embed :record))
+              (media (plist-get embed :media)))
+          (concat
+           ;; First show the quoted post
+           (when record
+             (let ((record-embed (plist-get record :record)))
+               (when record-embed
+                 (bluemacs--format-quoted-post record-embed indent-str))))
+           ;; Then show any images
+           (when media
+             (concat indent-str (bluemacs--format-embed-images media))))))
+
+       ;; Regular images
+       ((or (string= embed-type "app.bsky.embed.images")
+            (string= embed-type "app.bsky.embed.images#view"))
+        (bluemacs--format-embed-images embed))
+
+       ;; External link embeds - just show a simple indicator
+       ((or (string= embed-type "app.bsky.embed.external")
+            (string= embed-type "app.bsky.embed.external#view"))
+        (let ((external (plist-get embed :external)))
+          (when external
+            (let ((title (plist-get external :title))
+                  (uri (plist-get external :uri)))
+              (when (or title uri)
+                (concat indent-str
+                        (format "[Link: %s]\n" (or title uri))))))))))))
 
 ;;; Timeline
 
@@ -369,7 +457,7 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
              (liked (not (null like-uri)))
              (repost-uri (when viewer (plist-get viewer :repost)))
              (reposted (not (null repost-uri)))
-             (images (bluemacs--format-embed-images embed))
+             (embeds (bluemacs--format-embeds embed indent-str))
              (formatted-text (bluemacs--buttonize-with-facets text facets))
              (post-header (format "%s (@%s) - %s\n%s"
                                   (propertize author-display 'face 'bold)
@@ -416,8 +504,8 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
                      'bluemacs-root-cid actual-root-cid
                      'bluemacs-like-uri like-uri
                      'bluemacs-repost-uri repost-uri)
-         (when images
-           (propertize (concat "\n" indent-str images)
+         (when embeds
+           (propertize (concat "\n" embeds)
                        'bluemacs-post-uri uri
                        'bluemacs-post-cid cid
                        'bluemacs-post-author-did author-did
@@ -552,6 +640,28 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
         (bluemacs-mode))
       (switch-to-buffer (current-buffer)))
     (message "Thread loaded")))
+
+;;;###autoload
+(defun bluemacs-view-quoted-post ()
+  "View the thread for the quoted post at point."
+  (interactive)
+  (unless bluemacs-access-token
+    (user-error "Not logged in.  Run M-x bluemacs-login first"))
+  (let ((uri (get-text-property (point) 'bluemacs-quoted-post-uri)))
+    (unless uri
+      (user-error "No quoted post at point"))
+    (message "Fetching quoted post thread...")
+    (bluemacs--make-request
+     (format "/xrpc/app.bsky.feed.getPostThread?uri=%s&depth=10"
+             (url-hexify-string uri))
+     "GET"
+     nil
+     (lambda (response _status)
+       (let ((thread (plist-get response :thread)))
+         (if thread
+             (bluemacs--display-thread thread)
+           (message "Failed to fetch quoted post thread: %s"
+                    (or (plist-get response :message) "Unknown error"))))))))
 
 (defun bluemacs--insert-thread (thread indent-level &optional root-uri root-cid)
   "Insert THREAD with INDENT-LEVEL into current buffer.

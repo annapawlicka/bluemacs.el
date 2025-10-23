@@ -7,6 +7,7 @@ A (WIP) Bluesky client for Emacs.
 - Secure authentication with Bluesky
 - View your timeline with UTF-8 support (including emojis)
 - Display embedded images inline (in graphical Emacs)
+- Display quote posts (posts that reference other posts)
 - Compose and post text updates
 - Reply to posts with proper threading
 - Like and unlike posts
@@ -223,6 +224,34 @@ bluemacs can display embedded images inline when running in graphical Emacs.
 
 **Note:** Images only display in graphical Emacs. In terminal mode, alt text is shown instead.
 
+## Quote Posts
+
+bluemacs automatically displays quote posts (posts that reference/embed other posts) in your timeline.
+
+**Features:**
+- Quote posts are displayed with a bordered box around the quoted content
+- Shows the author and text of the quoted post
+- Works for both simple quote posts and quote posts with images
+- Links in quoted posts are also clickable
+- **Interactive**: Press `RET` (Enter) on a quoted post to view its full thread with all interactions
+- The quoted post section is highlighted when you hover over it
+
+**Usage:**
+1. Navigate to a post that contains a quote (you'll see the bordered box)
+2. Move your cursor anywhere within the quoted post section
+3. Press `RET` (Enter) to open the quoted post's full thread
+4. View all replies, likes, and reposts for that quoted post
+5. Press `b` to return to your timeline
+
+**Display format:**
+```
+┌─ Quoted Post ─────────────────────────────────────────────────
+│ Author Name (@handle) - [press RET to view thread]
+│ Text of the quoted post...
+│ [Images if present]
+└───────────────────────────────────────────────────────────────
+```
+
 ## Saving Credentials
 
 By default, your password is not saved and you'll need to log in each time you restart Emacs. To save credentials securely:
@@ -292,6 +321,7 @@ With credentials saved, `bluemacs-login` will automatically use them without pro
 | `bluemacs-toggle-like`            | Like or unlike post at point             |
 | `bluemacs-toggle-repost`          | Repost or unrepost post at point         |
 | `bluemacs-view-thread`            | View thread/replies for post at point    |
+| `bluemacs-view-quoted-post`       | View thread for quoted post at point     |
 | `bluemacs-back-to-timeline`       | Return to timeline from thread view      |
 | `bluemacs-toggle-auto-refresh`    | Toggle auto-refresh on/off               |
 | `bluemacs-set-refresh-interval`   | Set auto-refresh interval                |
@@ -319,11 +349,12 @@ Completed features:
 - [x] Reply to posts
 - [x] Like posts
 - [x] Repost posts
+- [x] Display quote posts
 
 Future features planned:
+- [ ] Create quote posts
 - [ ] View user profiles
 - [ ] Notifications
-- [ ] Quote posts
 
 ## Contributing
 
