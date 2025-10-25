@@ -13,6 +13,7 @@ A (WIP) Bluesky client for Emacs.
 - Like and unlike posts
 - Repost and unrepost posts
 - View conversation threads with replies
+- View notifications (likes, reposts, follows, mentions, replies, quotes)
 - Clickable links in posts
 - Auto-refresh timeline at configurable intervals
 - Simple keybindings
@@ -83,6 +84,7 @@ In the timeline buffer:
 | `l` | Like/unlike post at point     |
 | `R` | Repost/unrepost post at point |
 | `t` | View thread/replies           |
+| `N` | View notifications            |
 | `b` | Back to timeline              |
 | `a` | Toggle auto-refresh           |
 | `i` | Set refresh interval          |
@@ -252,6 +254,38 @@ bluemacs automatically displays quote posts (posts that reference/embed other po
 └───────────────────────────────────────────────────────────────
 ```
 
+## Notifications
+
+View your Bluesky notifications to see who has interacted with your posts:
+
+```elisp
+M-x bluemacs-notifications
+```
+
+Or press `N` from the timeline buffer.
+
+**Features:**
+- View all your Bluesky notifications in a dedicated buffer
+- Different icons for each notification type:
+  - ♥ Likes
+  - ♻ Reposts
+  - 👤 Follows
+  - @ Mentions
+  - ↩ Replies
+  - 💬 Quote posts
+- **Unread notifications** are shown in bold text
+- Shows the post text (when applicable)
+- Press `t` on any notification to view the full thread
+- Fetches the 50 most recent notifications
+
+**Display format:**
+```
+♥ Alice (@alice.bsky.social) liked your post
+  Your post text here...
+  [2025-10-22T10:30:00Z] - press 't' to view thread
+--------------------------------------------------------------------------------
+```
+
 ## Saving Credentials
 
 By default, your password is not saved and you'll need to log in each time you restart Emacs. To save credentials securely:
@@ -315,6 +349,7 @@ With credentials saved, `bluemacs-login` will automatically use them without pro
 | `bluemacs-logout`                 | Log out from current session             |
 | `bluemacs-timeline`               | Fetch and display timeline               |
 | `bluemacs-refresh-timeline`       | Refresh the current timeline             |
+| `bluemacs-notifications`          | View notifications                       |
 | `bluemacs-compose`                | Compose a new post in buffer             |
 | `bluemacs-post`                   | Post text from minibuffer                |
 | `bluemacs-reply`                  | Reply to post at point                   |
@@ -350,11 +385,11 @@ Completed features:
 - [x] Like posts
 - [x] Repost posts
 - [x] Display quote posts
+- [x] Notifications
 
 Future features planned:
 - [ ] Create quote posts
 - [ ] View user profiles
-- [ ] Notifications
 
 ## Contributing
 

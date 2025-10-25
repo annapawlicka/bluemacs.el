@@ -103,6 +103,9 @@ If set to a number, the timeline will automatically refresh at that interval."
 (defvar bluemacs-timeline-buffer "*Bluesky Timeline*"
   "Buffer name for displaying timeline.")
 
+(defvar bluemacs-notifications-buffer "*Bluesky Notifications*"
+  "Buffer name for displaying notifications.")
+
 (defvar bluemacs-refresh-timer nil
   "Timer object for auto-refreshing timeline.")
 
@@ -246,7 +249,10 @@ CALLBACK is called with parsed JSON response."
          (author-display (or (plist-get author :displayName) author-handle))
          (text (or (plist-get value :text) "[No text]"))
          (facets (plist-get value :facets))
-         (embeds-data (plist-get value :embed))  ;; Embeds within the quoted post
+         ;; Embeds can be at :embeds (a list) or :value :embed (single object)
+         (embeds-list (plist-get quoted-post :embeds))
+         (embeds-data (or (and embeds-list (car embeds-list))  ; :embeds is a list, take first
+                          (plist-get value :embed)))           ; :value :embed is single object
          (formatted-text (bluemacs--buttonize-with-facets text facets))
          (quoted-embeds (when embeds-data
                           (bluemacs--format-embeds embeds-data (concat indent-str "│ ")))))
@@ -580,6 +586,121 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
     (message "Images only work in graphical Emacs (not terminal mode)"))
   (when (get-buffer bluemacs-timeline-buffer)
     (bluemacs-refresh-timeline)))
+
+;;; Notifications
+
+(defun bluemacs--format-notification (notif)
+  "Format a single NOTIF for display."
+  (condition-case err
+      (let* ((reason (plist-get notif :reason))
+             (author (plist-get notif :author))
+             (record (plist-get notif :record))
+             (is-read (plist-get notif :isRead))
+             (indexed-at (plist-get notif :indexedAt))
+             (author-handle (or (plist-get author :handle) "unknown"))
+             (author-display (or (plist-get author :displayName) author-handle))
+             (uri (plist-get notif :uri))
+             (cid (plist-get notif :cid))
+             (reason-subject (plist-get notif :reasonSubject))
+             ;; Extract post URI based on notification type
+             (post-uri (cond
+                        ;; For like-via-repost, record's :subject :uri contains the actual post
+                        ((string= reason "like-via-repost")
+                         (let ((subject (plist-get record :subject)))
+                           (or (plist-get subject :uri) reason-subject uri)))
+                        ;; For regular like/repost, reasonSubject contains the actual post URI
+                        ((member reason '("like" "repost"))
+                         reason-subject)
+                        ;; For other types, use uri
+                        (t uri)))
+             ;; Different notification types
+             (reason-text (pcase reason
+                           ("like" "liked your post")
+                           ("repost" "reposted your post")
+                           ("like-via-repost" "liked your post via repost")
+                           ("follow" "followed you")
+                           ("mention" "mentioned you")
+                           ("reply" "replied to your post")
+                           ("quote" "quoted your post")
+                           (_ (format "interacted (%s)" reason))))
+             (reason-icon (pcase reason
+                           ("like" "♥")
+                           ("repost" "♻")
+                           ("like-via-repost" "♥♻")
+                           ("follow" "👤")
+                           ("mention" "@")
+                           ("reply" "↩")
+                           ("quote" "💬")
+                           (_ "•")))
+             ;; Get post text if available
+             (text (when record (plist-get record :text)))
+             (formatted-text (if text
+                               (bluemacs--buttonize-with-facets
+                                text
+                                (when record (plist-get record :facets)))
+                             "")))
+        (let ((notification-text
+               (concat
+                (propertize (format "%s %s (@%s) %s\n"
+                                    reason-icon
+                                    author-display
+                                    author-handle
+                                    reason-text)
+                            'face (if is-read 'default '(:weight bold)))
+                (when text
+                  (concat "  " formatted-text "\n"))
+                (format "  [%s]%s\n"
+                        (bluemacs--format-timestamp indexed-at)
+                        (if post-uri " - press 't' to view thread" ""))
+                (make-string 80 ?-)
+                "\n")))
+          ;; Apply post URI/CID to entire notification using add-text-properties
+          (add-text-properties 0 (length notification-text)
+                               (list 'bluemacs-post-uri post-uri
+                                     'bluemacs-post-cid cid)
+                               notification-text)
+          notification-text))
+    (error
+     (message "Error formatting notification: %s" (error-message-string err))
+     (format "[Error displaying notification: %s]\n%s\n"
+             (error-message-string err)
+             (make-string 80 ?-)))))
+
+(defun bluemacs--display-notifications (notifications)
+  "Display NOTIFICATIONS in notifications buffer."
+  (with-current-buffer (get-buffer-create bluemacs-notifications-buffer)
+    (let ((inhibit-read-only t))
+      (erase-buffer)
+      (set-buffer-multibyte t)
+      (setq buffer-file-coding-system 'utf-8)
+      (insert (propertize (format "Bluesky Notifications (@%s)\n" bluemacs-handle)
+                          'face '(:height 1.5 :weight bold))
+              (make-string 80 ?=)
+              "\n\n")
+      (dolist (notif notifications)
+        (insert (bluemacs--format-notification notif)))
+      (goto-char (point-min))
+      (bluemacs-mode))
+    (switch-to-buffer (current-buffer))))
+
+;;;###autoload
+(defun bluemacs-notifications ()
+  "Fetch and display Bluesky notifications."
+  (interactive)
+  (unless bluemacs-access-token
+    (user-error "Not logged in.  Run M-x bluemacs-login first"))
+  (message "Fetching notifications...")
+  (bluemacs--make-request
+   "/xrpc/app.bsky.notification.listNotifications?limit=50"
+   "GET"
+   nil
+   (lambda (response _status)
+     (let ((notifications (plist-get response :notifications)))
+       (if notifications
+           (progn
+             (bluemacs--display-notifications notifications)
+             (message "Notifications fetched: %d items" (length notifications)))
+         (message "No notifications found"))))))
 
 ;;; Thread/Replies
 
@@ -1003,6 +1124,7 @@ REPLY-TO should be a plist with :uri, :cid, and :author-did."
     (define-key map "l" #'bluemacs-toggle-like)
     (define-key map "R" #'bluemacs-toggle-repost)
     (define-key map "t" #'bluemacs-view-thread)
+    (define-key map "N" #'bluemacs-notifications)
     (define-key map "b" #'bluemacs-back-to-timeline)
     (define-key map "a" #'bluemacs-toggle-auto-refresh)
     (define-key map "i" #'bluemacs-set-refresh-interval)
