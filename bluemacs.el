@@ -106,8 +106,15 @@ If set to a number, the timeline will automatically refresh at that interval."
 (defvar bluemacs-notifications-buffer "*Bluesky Notifications*"
   "Buffer name for displaying notifications.")
 
+(defvar bluemacs-profile-buffer "*Bluesky Profile*"
+  "Buffer name for displaying user profiles.")
+
 (defvar bluemacs-refresh-timer nil
   "Timer object for auto-refreshing timeline.")
+
+(defvar bluemacs-navigation-stack nil
+  "Stack of previous buffers for navigation history.
+Each entry is a cons cell (buffer-name . position).")
 
 (defvar-local bluemacs-reply-data nil
   "Buffer-local variable storing reply data (parent post info).")
@@ -372,6 +379,40 @@ Handles both image embeds and quote post (record) embeds."
                 (concat indent-str
                         (format "[Link: %s]\n" (or title uri))))))))))))
 
+;;; Navigation
+
+(defun bluemacs--push-navigation (buffer-name)
+  "Push current BUFFER-NAME and position to navigation stack."
+  (when (and (buffer-live-p (get-buffer buffer-name))
+             ;; Don't push HTTP/URL temp buffers to stack
+             (not (string-match-p "^\\*http" buffer-name))
+             (not (string-match-p "^https?://" buffer-name))
+             (not (string-match-p "^ " buffer-name)))
+    (with-current-buffer buffer-name
+      (push (cons buffer-name (point)) bluemacs-navigation-stack))))
+
+(defun bluemacs--pop-navigation ()
+  "Pop and return to previous buffer from navigation stack.
+Returns t if navigation succeeded, nil otherwise."
+  ;; First, clean out any HTTP/temp buffers from the stack
+  (setq bluemacs-navigation-stack
+        (seq-filter (lambda (entry)
+                      (let ((buf-name (car entry)))
+                        (and (not (string-match-p "^\\*http" buf-name))
+                             (not (string-match-p "^https?://" buf-name))
+                             (not (string-match-p "^ " buf-name)))))
+                    bluemacs-navigation-stack))
+
+  (when bluemacs-navigation-stack
+    (let ((prev (pop bluemacs-navigation-stack)))
+      (when prev
+        (let ((buffer-name (car prev))
+              (position (cdr prev)))
+          (when (buffer-live-p (get-buffer buffer-name))
+            (switch-to-buffer buffer-name)
+            (goto-char position)
+            t))))))
+
 ;;; Timeline
 
 (defun bluemacs--format-timestamp (timestamp)
@@ -490,6 +531,7 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
                      'bluemacs-post-uri uri
                      'bluemacs-post-cid cid
                      'bluemacs-post-author-did author-did
+                     'bluemacs-post-author-handle author-handle
                      'bluemacs-root-uri actual-root-uri
                      'bluemacs-root-cid actual-root-cid
                      'bluemacs-like-uri like-uri
@@ -498,6 +540,7 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
                      'bluemacs-post-uri uri
                      'bluemacs-post-cid cid
                      'bluemacs-post-author-did author-did
+                     'bluemacs-post-author-handle author-handle
                      'bluemacs-root-uri actual-root-uri
                      'bluemacs-root-cid actual-root-cid
                      'bluemacs-like-uri like-uri
@@ -506,6 +549,7 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
                      'bluemacs-post-uri uri
                      'bluemacs-post-cid cid
                      'bluemacs-post-author-did author-did
+                     'bluemacs-post-author-handle author-handle
                      'bluemacs-root-uri actual-root-uri
                      'bluemacs-root-cid actual-root-cid
                      'bluemacs-like-uri like-uri
@@ -515,6 +559,7 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
                        'bluemacs-post-uri uri
                        'bluemacs-post-cid cid
                        'bluemacs-post-author-did author-did
+                       'bluemacs-post-author-handle author-handle
                        'bluemacs-root-uri actual-root-uri
                        'bluemacs-root-cid actual-root-cid
                        'bluemacs-like-uri like-uri
@@ -523,6 +568,7 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
                      'bluemacs-post-uri uri
                      'bluemacs-post-cid cid
                      'bluemacs-post-author-did author-did
+                     'bluemacs-post-author-handle author-handle
                      'bluemacs-root-uri actual-root-uri
                      'bluemacs-root-cid actual-root-cid
                      'bluemacs-like-uri like-uri
@@ -668,6 +714,9 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
 
 (defun bluemacs--display-notifications (notifications)
   "Display NOTIFICATIONS in notifications buffer."
+  ;; Save current buffer to navigation stack
+  (when (buffer-live-p (current-buffer))
+    (bluemacs--push-navigation (buffer-name (current-buffer))))
   (with-current-buffer (get-buffer-create bluemacs-notifications-buffer)
     (let ((inhibit-read-only t))
       (erase-buffer)
@@ -701,6 +750,118 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
              (bluemacs--display-notifications notifications)
              (message "Notifications fetched: %d items" (length notifications)))
          (message "No notifications found"))))))
+
+;;; Profiles
+
+(defun bluemacs--format-profile (profile)
+  "Format a PROFILE for display."
+  (let* ((handle (or (plist-get profile :handle) "unknown"))
+         (display-name (or (plist-get profile :displayName) handle))
+         (description (plist-get profile :description))
+         (avatar (plist-get profile :avatar))
+         (banner (plist-get profile :banner))
+         (followers-count (plist-get profile :followersCount))
+         (follows-count (plist-get profile :followsCount))
+         (posts-count (plist-get profile :postsCount))
+         (did (plist-get profile :did)))
+    (concat
+     ;; Display banner image if available
+     (when (and banner bluemacs-display-images (display-graphic-p))
+       (condition-case nil
+           (let ((temp-file (make-temp-file "bluemacs-banner-" nil ".jpg")))
+             (url-copy-file banner temp-file t)
+             (concat
+              (propertize " "
+                          'display (create-image temp-file nil nil
+                                                 :width bluemacs-image-max-width
+                                                 :height 200)
+                          'keymap bluemacs-mode-map)
+              "\n"))
+         (error "")))
+
+     ;; Display avatar if available
+     (when (and avatar bluemacs-display-images (display-graphic-p))
+       (condition-case nil
+           (let ((temp-file (make-temp-file "bluemacs-avatar-" nil ".jpg")))
+             (url-copy-file avatar temp-file t)
+             (concat
+              (propertize " "
+                          'display (create-image temp-file nil nil
+                                                 :width 100
+                                                 :height 100)
+                          'keymap bluemacs-mode-map)
+              "\n"))
+         (error "")))
+
+     ;; Name and handle
+     (propertize (format "%s\n" display-name)
+                 'face '(:height 1.5 :weight bold))
+     (propertize (format "@%s\n\n" handle)
+                 'face '(:foreground "gray"))
+
+     ;; Description/bio
+     (when description
+       (concat description "\n\n"))
+
+     ;; Stats
+     (format "%s posts  •  %s followers  •  %s following\n\n"
+             (or posts-count 0)
+             (or followers-count 0)
+             (or follows-count 0))
+
+     ;; DID
+     (propertize (format "DID: %s\n" did)
+                 'face '(:foreground "gray" :height 0.9))
+
+     (make-string 80 ?=)
+     "\n\n")))
+
+(defun bluemacs--display-profile (profile)
+  "Display PROFILE in profile buffer."
+  ;; Save current buffer to navigation stack
+  (when (buffer-live-p (current-buffer))
+    (bluemacs--push-navigation (buffer-name (current-buffer))))
+
+  ;; Kill any lingering HTTP/URL buffers from image loading
+  (dolist (buf (buffer-list))
+    (when (string-match-p "^\\*http.*\\*" (buffer-name buf))
+      (kill-buffer buf)))
+
+  (with-current-buffer (get-buffer-create bluemacs-profile-buffer)
+    (let ((inhibit-read-only t))
+      (erase-buffer)
+      (set-buffer-multibyte t)
+      (setq buffer-file-coding-system 'utf-8)
+      (insert (bluemacs--format-profile profile))
+      (goto-char (point-min))
+      (bluemacs-mode))
+    (switch-to-buffer (current-buffer))))
+
+;;;###autoload
+(defun bluemacs-view-profile (handle)
+  "View profile for user HANDLE.
+If called interactively, prompts for handle.
+If called from timeline/thread, uses author handle at point."
+  (interactive
+   (list (or (get-text-property (point) 'bluemacs-post-author-handle)
+             (read-string "Handle (e.g., user.bsky.social): "))))
+  (unless bluemacs-access-token
+    (user-error "Not logged in.  Run M-x bluemacs-login first"))
+  (unless handle
+    (user-error "No handle specified"))
+  (message "Fetching profile for @%s..." handle)
+  (bluemacs--make-request
+   (format "/xrpc/app.bsky.actor.getProfile?actor=%s"
+           (url-hexify-string handle))
+   "GET"
+   nil
+   (lambda (response _status)
+     (if (plist-get response :handle)
+         (progn
+           (bluemacs--display-profile response)
+           (message "Profile fetched: @%s" handle))
+       (message "Failed to fetch profile: %s"
+                (or (plist-get response :message) "Unknown error"))))))
 
 ;;; Thread/Replies
 
@@ -746,6 +907,9 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
 
 (defun bluemacs--display-thread (thread)
   "Display THREAD in a buffer."
+  ;; Save current buffer to navigation stack
+  (when (buffer-live-p (current-buffer))
+    (bluemacs--push-navigation (buffer-name (current-buffer))))
   (let ((buffer (get-buffer-create "*Bluesky Thread*")))
     (with-current-buffer buffer
       (let ((inhibit-read-only t))
@@ -753,7 +917,7 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
         (set-buffer-multibyte t)
         (setq buffer-file-coding-system 'utf-8)
         (insert (propertize "Thread View" 'face '(:height 1.5 :weight bold))
-                (propertize " (press 'b' to go back to timeline)\n" 'face 'italic)
+                (propertize " (press 'b' to go back)\n" 'face 'italic)
                 (make-string 80 ?=)
                 "\n\n")
         (bluemacs--insert-thread thread 0)
@@ -805,16 +969,46 @@ ROOT-URI and ROOT-CID identify the root post of the thread."
 
 ;;;###autoload
 (defun bluemacs-back-to-timeline ()
-  "Close current view and return to timeline."
+  "Close current view and return to previous view or timeline."
   (interactive)
-  (let ((timeline-buffer (get-buffer bluemacs-timeline-buffer)))
-    (if timeline-buffer
-        (progn
-          (kill-buffer)
-          (switch-to-buffer timeline-buffer))
-      (progn
-        (kill-buffer)
-        (bluemacs-timeline)))))
+  (let ((current (current-buffer))
+        (current-name (buffer-name))
+        (bluemacs-buffers (list bluemacs-timeline-buffer
+                                bluemacs-notifications-buffer
+                                bluemacs-profile-buffer)))
+
+    ;; If we're in a URL temp buffer or HTTP buffer, kill it and find a bluemacs buffer
+    (when (or (string-match-p "^https?://" current-name)
+              (string-match-p "^ " current-name)
+              (with-current-buffer current
+                (goto-char (point-min))
+                (looking-at "HTTP/"))) ; Check if buffer starts with HTTP response
+      ;; Kill the temp buffer
+      (kill-buffer current)
+      ;; Find and switch to any visible bluemacs buffer
+      (let ((found nil))
+        (dolist (buf-name bluemacs-buffers)
+          (when (and (not found) (get-buffer buf-name))
+            (switch-to-buffer buf-name)
+            (setq current (current-buffer))
+            (setq found t)))
+        ;; If no bluemacs buffer found, create timeline
+        (unless found
+          (bluemacs-timeline)
+          (setq current (current-buffer)))))
+
+    ;; Now proceed with normal navigation from a proper bluemacs buffer
+    (unless (bluemacs--pop-navigation)
+      ;; If stack is empty, fall back to timeline
+      (let ((timeline-buffer (get-buffer bluemacs-timeline-buffer)))
+        (if timeline-buffer
+            (switch-to-buffer timeline-buffer)
+          (bluemacs-timeline))))
+
+    ;; Kill temporary thread buffers (but keep timeline/notifications/profile)
+    (when (and (buffer-live-p current)
+               (not (member (buffer-name current) bluemacs-buffers)))
+      (kill-buffer current))))
 
 ;;; Posting
 
@@ -1125,6 +1319,7 @@ REPLY-TO should be a plist with :uri, :cid, and :author-did."
     (define-key map "R" #'bluemacs-toggle-repost)
     (define-key map "t" #'bluemacs-view-thread)
     (define-key map "N" #'bluemacs-notifications)
+    (define-key map "P" #'bluemacs-view-profile)
     (define-key map "b" #'bluemacs-back-to-timeline)
     (define-key map "a" #'bluemacs-toggle-auto-refresh)
     (define-key map "i" #'bluemacs-set-refresh-interval)

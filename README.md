@@ -14,6 +14,7 @@ A (WIP) Bluesky client for Emacs.
 - Repost and unrepost posts
 - View conversation threads with replies
 - View notifications (likes, reposts, follows, mentions, replies, quotes)
+- View user profiles with avatar, bio, and stats
 - Clickable links in posts
 - Auto-refresh timeline at configurable intervals
 - Simple keybindings
@@ -85,7 +86,8 @@ In the timeline buffer:
 | `R` | Repost/unrepost post at point |
 | `t` | View thread/replies           |
 | `N` | View notifications            |
-| `b` | Back to timeline              |
+| `P` | View user profile             |
+| `b` | Back to previous view         |
 | `a` | Toggle auto-refresh           |
 | `i` | Set refresh interval          |
 | `I` | Toggle image display          |
@@ -97,6 +99,22 @@ In the timeline buffer:
 | `DEL` | Scroll down                 |
 | `<` | Beginning of buffer           |
 | `>` | End of buffer                 |
+
+## Navigation
+
+bluemacs maintains a navigation history stack, allowing you to browse through different views and return to where you came from:
+
+- **Press `b`** to go back to the previous view (timeline, thread, profile, or notifications)
+- The navigation stack remembers your scroll position in each buffer
+- If the navigation stack is empty, `b` returns to the timeline
+- You can navigate through multiple levels: timeline → thread → profile → back to thread → back to timeline
+
+**Example navigation flow:**
+1. View timeline
+2. Press `t` on a post to view its thread (timeline is saved to history)
+3. Press `P` on a reply to view that user's profile (thread is saved to history)
+4. Press `b` to return to the thread view
+5. Press `b` again to return to the timeline
 
 ## Auto-Refresh
 
@@ -286,6 +304,29 @@ Or press `N` from the timeline buffer.
 --------------------------------------------------------------------------------
 ```
 
+## User Profiles
+
+View detailed user profiles including avatar, banner, bio, and statistics:
+
+**From timeline or thread:**
+1. Navigate to any post
+2. Press `P` to view the author's profile
+
+**Or manually:**
+```elisp
+M-x bluemacs-view-profile RET username.bsky.social RET
+```
+
+**Profile display includes:**
+- Banner image (if available, in graphical Emacs)
+- Avatar image (if available, in graphical Emacs)
+- Display name and handle
+- Bio/description
+- Stats: post count, follower count, following count
+- DID (Decentralized Identifier)
+
+**Note:** Profile images only display in graphical Emacs. The profile information is shown in a dedicated buffer.
+
 ## Saving Credentials
 
 By default, your password is not saved and you'll need to log in each time you restart Emacs. To save credentials securely:
@@ -357,7 +398,8 @@ With credentials saved, `bluemacs-login` will automatically use them without pro
 | `bluemacs-toggle-repost`          | Repost or unrepost post at point         |
 | `bluemacs-view-thread`            | View thread/replies for post at point    |
 | `bluemacs-view-quoted-post`       | View thread for quoted post at point     |
-| `bluemacs-back-to-timeline`       | Return to timeline from thread view      |
+| `bluemacs-view-profile`           | View user profile                        |
+| `bluemacs-back-to-timeline`       | Return to previous view or timeline      |
 | `bluemacs-toggle-auto-refresh`    | Toggle auto-refresh on/off               |
 | `bluemacs-set-refresh-interval`   | Set auto-refresh interval                |
 | `bluemacs-toggle-images`          | Toggle image display on/off              |
@@ -386,10 +428,11 @@ Completed features:
 - [x] Repost posts
 - [x] Display quote posts
 - [x] Notifications
+- [x] View user profiles
 
 Future features planned:
 - [ ] Create quote posts
-- [ ] View user profiles
+- [ ] View recent posts when viewing profile
 
 ## Contributing
 
