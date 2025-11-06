@@ -8,10 +8,12 @@ A (WIP) Bluesky client for Emacs.
 - View your timeline with UTF-8 support (including emojis)
 - Display embedded images inline (in graphical Emacs)
 - Display quote posts (posts that reference other posts)
+- Create quote posts
 - Compose and post text updates
 - Reply to posts with proper threading
 - Like and unlike posts
 - Repost and unrepost posts
+- View who reposted posts in your timeline
 - View conversation threads with replies
 - View notifications (likes, reposts, follows, mentions, replies, quotes)
 - View user profiles with avatar, bio, and stats
@@ -82,6 +84,7 @@ In the timeline buffer:
 | `g` | Refresh timeline              |
 | `c` | Compose new post              |
 | `r` | Reply to post at point        |
+| `Q` | Quote post at point           |
 | `l` | Like/unlike post at point     |
 | `R` | Repost/unrepost post at point |
 | `t` | View thread/replies           |
@@ -212,7 +215,15 @@ Repost (boost/retweet) any post to share it with your followers:
 
 **Features:**
 - Posts you've reposted show a ♻ symbol in the stats line
+- When viewing your timeline, reposted posts show who reposted them with a green header line
 - Works in both timeline and thread views
+
+**Display format for reposts in timeline:**
+```
+♻ Reposted by Alice Smith (@alice.bsky.social)
+Bob Jones (@bob.bsky.social) - 2025-01-15 10:30
+Post content here...
+```
 
 ## Images
 
@@ -246,7 +257,11 @@ bluemacs can display embedded images inline when running in graphical Emacs.
 
 ## Quote Posts
 
-bluemacs automatically displays quote posts (posts that reference/embed other posts) in your timeline.
+bluemacs supports both viewing and creating quote posts.
+
+### Viewing Quote Posts
+
+Quote posts are automatically displayed in your timeline with a bordered box around the quoted content.
 
 **Features:**
 - Quote posts are displayed with a bordered box around the quoted content
@@ -271,6 +286,16 @@ bluemacs automatically displays quote posts (posts that reference/embed other po
 │ [Images if present]
 └───────────────────────────────────────────────────────────────
 ```
+
+### Creating Quote Posts
+
+How to quote post:
+
+1. Navigate to the post you want to quote
+2. Press `Q` (shift+q, or run `M-x bluemacs-quote`)
+3. A compose buffer opens showing which post you're quoting
+4. Write your commentary (max 300 characters)
+5. Press `C-c C-c` to send or `C-c C-k` to cancel
 
 ## Notifications
 
@@ -394,6 +419,7 @@ With credentials saved, `bluemacs-login` will automatically use them without pro
 | `bluemacs-compose`                | Compose a new post in buffer             |
 | `bluemacs-post`                   | Post text from minibuffer                |
 | `bluemacs-reply`                  | Reply to post at point                   |
+| `bluemacs-quote`                  | Quote post at point with commentary      |
 | `bluemacs-toggle-like`            | Like or unlike post at point             |
 | `bluemacs-toggle-repost`          | Repost or unrepost post at point         |
 | `bluemacs-view-thread`            | View thread/replies for post at point    |
@@ -427,11 +453,12 @@ Completed features:
 - [x] Like posts
 - [x] Repost posts
 - [x] Display quote posts
+- [x] Create quote posts
+- [x] Display repost attribution in timeline
 - [x] Notifications
 - [x] View user profiles
 
 Future features planned:
-- [ ] Create quote posts
 - [ ] View recent posts when viewing profile
 
 ## Contributing
