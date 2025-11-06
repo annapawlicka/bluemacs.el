@@ -460,6 +460,7 @@ Completed features:
 
 Future features planned:
 - [ ] View recent posts when viewing profile
+- [ ] Follow/unfollow
 
 ## Contributing
 
