@@ -42,6 +42,10 @@
 ;; Replying to a post:
 ;;   Use 'r' on any post to open compose buffer.  In the compose buffer, press
 ;;   C-c C-c to send, C-c C-k to cancel.
+;;
+;; Quote posts:
+;;   Use 'Q' on any post to compose a quote post.  In the compose buffer, press
+;;   C-c C-c to send, C-c C-k to cancel.
 
 ;;; Code:
 
@@ -91,6 +95,9 @@ If set to a number, the timeline will automatically refresh at that interval."
 
 ;;; Variables
 
+(defconst bluemacs-line-width 80
+  "Width of horizontal divider lines in characters.")
+
 (defvar bluemacs-access-token nil
   "Access token for Bluesky API authentication.")
 
@@ -118,6 +125,11 @@ Each entry is a cons cell (buffer-name . position).")
 
 (defvar-local bluemacs-reply-data nil
   "Buffer-local variable storing reply data (parent post info).")
+
+(defvar-local bluemacs-quote-data nil
+  "Buffer-local variable storing quote data (quoted post info).")
+
+(defvar bluemacs-mode-map)  ; Forward declaration
 
 ;;; Authentication
 
@@ -262,11 +274,14 @@ CALLBACK is called with parsed JSON response."
                           (plist-get value :embed)))           ; :value :embed is single object
          (formatted-text (bluemacs--buttonize-with-facets text facets))
          (quoted-embeds (when embeds-data
-                          (bluemacs--format-embeds embeds-data (concat indent-str "│ ")))))
+                          (bluemacs--format-embeds embeds-data (concat indent-str "│ "))))
+         (label " Quoted Post ")
+         (top-line (concat "┌─" label (make-string (- bluemacs-line-width (length indent-str) 2 (length label)) ?─) "\n"))
+         (bottom-line (concat "└" (make-string (- bluemacs-line-width (length indent-str) 1) ?─) "\n")))
     (propertize
      (concat
       indent-str
-      "┌─ Quoted Post ─────────────────────────────────────────────────\n"
+      top-line
       indent-str
       "│ "
       (format "%s (@%s)" author-display author-handle)
@@ -279,7 +294,7 @@ CALLBACK is called with parsed JSON response."
       (when quoted-embeds
         (concat quoted-embeds "\n"))
       indent-str
-      "└───────────────────────────────────────────────────────────────\n")
+      bottom-line)
      'face '(:foreground "gray")
      'bluemacs-quoted-post-uri uri
      'bluemacs-quoted-post-cid cid
@@ -486,6 +501,17 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
   (condition-case err
       (let* ((indent-level (or indent-level 0))
              (indent-str (make-string (* indent-level 2) ?\s))
+             ;; Check for repost reason
+             (reason (plist-get post :reason))
+             (reason-type (when reason (plist-get reason :$type)))
+             (reposted-by (when (and reason
+                                      (string= reason-type "app.bsky.feed.defs#reasonRepost"))
+                            (plist-get reason :by)))
+             (reposted-by-handle (when reposted-by (plist-get reposted-by :handle)))
+             (reposted-by-display (when reposted-by
+                                    (or (plist-get reposted-by :displayName)
+                                        reposted-by-handle)))
+             ;; Regular post data
              (post-data (plist-get post :post))
              (uri (plist-get (or post-data post) :uri))
              (record (plist-get (or post-data post) :record))
@@ -506,6 +532,13 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
              (reposted (not (null repost-uri)))
              (embeds (bluemacs--format-embeds embed indent-str))
              (formatted-text (bluemacs--buttonize-with-facets text facets))
+             ;; Repost header if this was reposted into timeline
+             (repost-header (when reposted-by-display
+                              (propertize (format "%s♻ Reposted by %s (@%s)\n"
+                                                  indent-str
+                                                  reposted-by-display
+                                                  reposted-by-handle)
+                                          'face '(:foreground "green"))))
              (post-header (format "%s (@%s) - %s\n%s"
                                   (propertize author-display 'face 'bold)
                                   author-handle
@@ -520,13 +553,15 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
                                   (if liked " ♥" "")
                                   (if (> reply-count 0) " - press 't' to view thread" "")
                                   indent-str
-                                  (make-string 80 ?-)))
+                                  (make-string (- bluemacs-line-width (length indent-str)) ?-)))
              (cid (plist-get (or post-data post) :cid))
              (author-did (plist-get author :did))
              ;; For top-level posts, this post is the root. For replies, use provided root.
              (actual-root-uri (or root-uri uri))
              (actual-root-cid (or root-cid cid)))
         (concat
+         ;; Add repost header if present
+         (when repost-header repost-header)
          (propertize indent-str
                      'bluemacs-post-uri uri
                      'bluemacs-post-cid cid
@@ -577,7 +612,7 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
      (message "Error formatting post: %s" (error-message-string err))
      (format "[Error displaying post: %s]\n%s\n"
              (error-message-string err)
-             (make-string 80 ?-)))))
+             (make-string bluemacs-line-width ?-)))))
 
 (defun bluemacs--display-timeline (posts)
   "Display POSTS in timeline buffer."
@@ -588,7 +623,7 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
       (setq buffer-file-coding-system 'utf-8)
       (insert (propertize (format "Bluesky Timeline (@%s)\n" bluemacs-handle)
                           'face '(:height 1.5 :weight bold))
-              (make-string 80 ?=)
+              (make-string bluemacs-line-width ?=)
               "\n\n")
       (dolist (post posts)
         (insert (bluemacs--format-post post)))
@@ -698,7 +733,7 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
                 (format "  [%s]%s\n"
                         (bluemacs--format-timestamp indexed-at)
                         (if post-uri " - press 't' to view thread" ""))
-                (make-string 80 ?-)
+                (make-string bluemacs-line-width ?-)
                 "\n")))
           ;; Apply post URI/CID to entire notification using add-text-properties
           (add-text-properties 0 (length notification-text)
@@ -710,7 +745,7 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
      (message "Error formatting notification: %s" (error-message-string err))
      (format "[Error displaying notification: %s]\n%s\n"
              (error-message-string err)
-             (make-string 80 ?-)))))
+             (make-string bluemacs-line-width ?-)))))
 
 (defun bluemacs--display-notifications (notifications)
   "Display NOTIFICATIONS in notifications buffer."
@@ -724,7 +759,7 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
       (setq buffer-file-coding-system 'utf-8)
       (insert (propertize (format "Bluesky Notifications (@%s)\n" bluemacs-handle)
                           'face '(:height 1.5 :weight bold))
-              (make-string 80 ?=)
+              (make-string bluemacs-line-width ?=)
               "\n\n")
       (dolist (notif notifications)
         (insert (bluemacs--format-notification notif)))
@@ -813,7 +848,7 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
      (propertize (format "DID: %s\n" did)
                  'face '(:foreground "gray" :height 0.9))
 
-     (make-string 80 ?=)
+     (make-string bluemacs-line-width ?=)
      "\n\n")))
 
 (defun bluemacs--display-profile (profile)
@@ -918,7 +953,7 @@ If called from timeline/thread, uses author handle at point."
         (setq buffer-file-coding-system 'utf-8)
         (insert (propertize "Thread View" 'face '(:height 1.5 :weight bold))
                 (propertize " (press 'b' to go back)\n" 'face 'italic)
-                (make-string 80 ?=)
+                (make-string bluemacs-line-width ?=)
                 "\n\n")
         (bluemacs--insert-thread thread 0)
         (goto-char (point-min))
@@ -1017,10 +1052,12 @@ ROOT-URI and ROOT-CID identify the root post of the thread."
   (format-time-string "%Y-%m-%dT%H:%M:%S.000Z" (current-time) t))
 
 ;;;###autoload
-(defun bluemacs-post (text &optional reply-to)
+(defun bluemacs-post (text &optional reply-to quote-post)
   "Post TEXT as a new skeet to Bluesky.
 If REPLY-TO is provided, post as a reply to that post.
-REPLY-TO should be a plist with :uri, :cid, and :author-did."
+REPLY-TO should be a plist with :uri, :cid, and :author-did.
+If QUOTE-POST is provided, post as a quote post with embedded reference.
+QUOTE-POST should be a plist with :uri and :cid."
   (interactive "sPost text: ")
   (unless bluemacs-access-token
     (user-error "Not logged in.  Run M-x bluemacs-login first"))
@@ -1033,10 +1070,15 @@ REPLY-TO should be a plist with :uri, :cid, and :author-did."
                                  (cid . ,(plist-get reply-to :root-cid))))
                         (parent . ((uri . ,(plist-get reply-to :uri))
                                    (cid . ,(plist-get reply-to :cid)))))))
+         (quote-embed (when quote-post
+                        `((record . ((uri . ,(plist-get quote-post :uri))
+                                     (cid . ,(plist-get quote-post :cid))))
+                          ($type . "app.bsky.embed.record"))))
          (record `((text . ,text)
                    (createdAt . ,(bluemacs--get-current-timestamp))
                    ($type . "app.bsky.feed.post")
-                   ,@(when reply-ref `((reply . ,reply-ref))))))
+                   ,@(when reply-ref `((reply . ,reply-ref)))
+                   ,@(when quote-embed `((embed . ,quote-embed))))))
     (bluemacs--make-request
      "/xrpc/com.atproto.repo.createRecord"
      "POST"
@@ -1130,6 +1172,53 @@ REPLY-TO should be a plist with :uri, :cid, and :author-did."
     (when (> (length text) 300)
       (user-error "Reply text too long (max 300 characters, got %d)" (length text)))
     (bluemacs-post text reply-data)
+    (kill-buffer)
+    (delete-window)))
+
+;;; Quoting
+
+;;;###autoload
+(defun bluemacs-quote ()
+  "Compose a quote post for the post at point."
+  (interactive)
+  (unless bluemacs-access-token
+    (user-error "Not logged in.  Run M-x bluemacs-login first"))
+  (let* ((uri (get-text-property (point) 'bluemacs-post-uri))
+         (cid (get-text-property (point) 'bluemacs-post-cid)))
+    (unless (and uri cid)
+      (user-error "No post at point to quote"))
+    (let ((buffer (get-buffer-create "*Bluesky Quote*"))
+          (quote-data (list :uri uri :cid cid)))
+      (with-current-buffer buffer
+        (erase-buffer)
+        (text-mode)
+        (insert ";; Write your quote post below (max 300 characters)\n")
+        (insert (format ";; Quoting post: %s\n" uri))
+        (insert ";; Press C-c C-c to post, C-c C-k to cancel\n\n")
+        ;; Store quote data as buffer-local variable
+        (setq-local bluemacs-quote-data quote-data)
+        (local-set-key (kbd "C-c C-c") #'bluemacs-quote-send)
+        (local-set-key (kbd "C-c C-k") #'bluemacs-compose-cancel))
+      (switch-to-buffer-other-window buffer)
+      (goto-char (point-max)))))
+
+(defun bluemacs-quote-send ()
+  "Send the quote post from the compose buffer."
+  (interactive)
+  (unless (boundp 'bluemacs-quote-data)
+    (user-error "No quote data found.  Use bluemacs-quote to compose a quote post"))
+  (let ((text (buffer-substring-no-properties
+               (save-excursion
+                 (goto-char (point-min))
+                 (forward-line 4)
+                 (point))
+               (point-max)))
+        (quote-data bluemacs-quote-data))
+    (when (string-empty-p (string-trim text))
+      (user-error "Quote post text cannot be empty"))
+    (when (> (length text) 300)
+      (user-error "Quote post text too long (max 300 characters, got %d)" (length text)))
+    (bluemacs-post text nil quote-data)
     (kill-buffer)
     (delete-window)))
 
@@ -1315,6 +1404,7 @@ REPLY-TO should be a plist with :uri, :cid, and :author-did."
     (define-key map "g" #'bluemacs-refresh-timeline)
     (define-key map "c" #'bluemacs-compose)
     (define-key map "r" #'bluemacs-reply)
+    (define-key map "Q" #'bluemacs-quote)
     (define-key map "l" #'bluemacs-toggle-like)
     (define-key map "R" #'bluemacs-toggle-repost)
     (define-key map "t" #'bluemacs-view-thread)
