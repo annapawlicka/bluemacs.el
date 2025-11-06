@@ -6,15 +6,10 @@ A (WIP) Bluesky client for Emacs.
 
 - Secure authentication with Bluesky
 - View your timeline with UTF-8 support (including emojis)
-- Display embedded images inline (in graphical Emacs)
-- Display quote posts (posts that reference other posts)
-- Create quote posts
-- Compose and post text updates
+- Create posts and quote posts
 - Reply to posts with proper threading
 - Like and unlike posts
 - Repost and unrepost posts
-- View who reposted posts in your timeline
-- View conversation threads with replies
 - View notifications (likes, reposts, follows, mentions, replies, quotes)
 - View user profiles with avatar, bio, and stats
 - Clickable links in posts
