@@ -272,9 +272,20 @@ CALLBACK is called with parsed JSON response."
          (embeds-list (plist-get quoted-post :embeds))
          (embeds-data (or (and embeds-list (car embeds-list))  ; :embeds is a list, take first
                           (plist-get value :embed)))           ; :value :embed is single object
-         (formatted-text (bluemacs--buttonize-with-facets text facets))
+         (quoted-indent (concat indent-str "│ "))
+         ;; Wrap author line
+         (author-line (bluemacs--wrap-text
+                       (concat (format "%s (@%s)" author-display author-handle)
+                               (when uri " - [press RET to view thread]"))
+                       bluemacs-line-width
+                       quoted-indent))
+         ;; Wrap text content
+         (formatted-text (bluemacs--wrap-text
+                         (bluemacs--buttonize-with-facets text facets)
+                         bluemacs-line-width
+                         quoted-indent))
          (quoted-embeds (when embeds-data
-                          (bluemacs--format-embeds embeds-data (concat indent-str "│ "))))
+                          (bluemacs--format-embeds embeds-data quoted-indent)))
          (label " Quoted Post ")
          (top-line (concat "┌─" label (make-string (- bluemacs-line-width (length indent-str) 2 (length label)) ?─) "\n"))
          (bottom-line (concat "└" (make-string (- bluemacs-line-width (length indent-str) 1) ?─) "\n")))
@@ -284,8 +295,7 @@ CALLBACK is called with parsed JSON response."
       top-line
       indent-str
       "│ "
-      (format "%s (@%s)" author-display author-handle)
-      (when uri " - [press RET to view thread]")
+      author-line
       "\n"
       indent-str
       "│ "
@@ -448,6 +458,19 @@ Returns t if navigation succeeded, nil otherwise."
         (setq char-pos (1+ char-pos))))
     char-pos))
 
+(defun bluemacs--wrap-text (text width indent-str)
+  "Wrap TEXT at WIDTH columns, prefixing wrapped lines with INDENT-STR.
+The first line is not indented (caller handles that).
+Returns the wrapped text."
+  (if (string-empty-p text)
+      text
+    (with-temp-buffer
+      (insert text)
+      (let ((fill-column (- width (length indent-str)))
+            (fill-prefix indent-str))
+        (fill-region (point-min) (point-max))
+        (buffer-string)))))
+
 (defun bluemacs--buttonize-with-facets (text facets)
   "Make URLs in TEXT clickable using FACETS metadata.
 FACETS is a list of facet objects from Bluesky API that describe
@@ -531,7 +554,10 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
              (repost-uri (when viewer (plist-get viewer :repost)))
              (reposted (not (null repost-uri)))
              (embeds (bluemacs--format-embeds embed indent-str))
-             (formatted-text (bluemacs--buttonize-with-facets text facets))
+             (formatted-text (bluemacs--wrap-text
+                             (bluemacs--buttonize-with-facets text facets)
+                             bluemacs-line-width
+                             indent-str))
              ;; Repost header if this was reposted into timeline
              (repost-header (when reposted-by-display
                               (propertize (format "%s♻ Reposted by %s (@%s)\n"
@@ -539,11 +565,14 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
                                                   reposted-by-display
                                                   reposted-by-handle)
                                           'face '(:foreground "green"))))
-             (post-header (format "%s (@%s) - %s\n%s"
-                                  (propertize author-display 'face 'bold)
-                                  author-handle
-                                  (bluemacs--format-timestamp created-at)
-                                  indent-str))
+             (post-header-text (format "%s (@%s) - %s"
+                                       (propertize author-display 'face 'bold)
+                                       author-handle
+                                       (bluemacs--format-timestamp created-at)))
+             (post-header (concat (bluemacs--wrap-text post-header-text
+                                                       bluemacs-line-width
+                                                       indent-str)
+                                  "\n" indent-str))
              (post-footer (format "\n%s[replies: %d  reposts: %d%s  likes: %d%s]%s\n%s%s\n"
                                   indent-str
                                   reply-count
@@ -715,20 +744,24 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
                            (_ "•")))
              ;; Get post text if available
              (text (when record (plist-get record :text)))
-             (formatted-text (if text
+             (header-text (format "%s %s (@%s) %s"
+                                  reason-icon
+                                  author-display
+                                  author-handle
+                                  reason-text))
+             (wrapped-header (bluemacs--wrap-text header-text bluemacs-line-width ""))
+             (formatted-text (when text
+                              (bluemacs--wrap-text
                                (bluemacs--buttonize-with-facets
                                 text
                                 (when record (plist-get record :facets)))
-                             "")))
+                               bluemacs-line-width
+                               "  "))))
         (let ((notification-text
                (concat
-                (propertize (format "%s %s (@%s) %s\n"
-                                    reason-icon
-                                    author-display
-                                    author-handle
-                                    reason-text)
+                (propertize (concat wrapped-header "\n")
                             'face (if is-read 'default '(:weight bold)))
-                (when text
+                (when formatted-text
                   (concat "  " formatted-text "\n"))
                 (format "  [%s]%s\n"
                         (bluemacs--format-timestamp indexed-at)
