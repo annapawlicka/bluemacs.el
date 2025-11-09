@@ -831,7 +831,10 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
          (followers-count (plist-get profile :followersCount))
          (follows-count (plist-get profile :followsCount))
          (posts-count (plist-get profile :postsCount))
-         (did (plist-get profile :did)))
+         (did (plist-get profile :did))
+         (viewer (plist-get profile :viewer))
+         (following (when viewer (plist-get viewer :following)))
+         (followed-by (when viewer (plist-get viewer :followedBy))))
     (concat
      ;; Display banner image if available
      (when (and banner bluemacs-display-images (display-graphic-p))
@@ -861,28 +864,60 @@ ROOT-URI and ROOT-CID identify the root post of the thread for reply tracking."
               "\n"))
          (error "")))
 
-     ;; Name and handle
+     ;; Name and handle (with text properties for follow/unfollow)
      (propertize (format "%s\n" display-name)
-                 'face '(:height 1.5 :weight bold))
-     (propertize (format "@%s\n\n" handle)
-                 'face '(:foreground "gray"))
+                 'face '(:height 1.5 :weight bold)
+                 'bluemacs-profile-did did
+                 'bluemacs-profile-handle handle
+                 'bluemacs-follow-uri following)
+     (propertize (format "@%s\n" handle)
+                 'face '(:foreground "gray")
+                 'bluemacs-profile-did did
+                 'bluemacs-profile-handle handle
+                 'bluemacs-follow-uri following)
+
+     ;; Follow status
+     (propertize (concat
+                  (cond
+                   (following "Following")
+                   (followed-by "Follows you")
+                   (t ""))
+                  (when (and following followed-by) "  •  Follows you")
+                  (when (or following followed-by) "\n"))
+                 'face '(:foreground "blue" :weight bold)
+                 'bluemacs-profile-did did
+                 'bluemacs-profile-handle handle
+                 'bluemacs-follow-uri following)
+
+     (when (or following followed-by) "\n")
 
      ;; Description/bio
      (when description
-       (concat description "\n\n"))
+       (propertize (concat description "\n\n")
+                   'bluemacs-profile-did did
+                   'bluemacs-profile-handle handle
+                   'bluemacs-follow-uri following))
 
      ;; Stats
-     (format "%s posts  •  %s followers  •  %s following\n\n"
-             (or posts-count 0)
-             (or followers-count 0)
-             (or follows-count 0))
+     (propertize (format "%s posts  •  %s followers  •  %s following\n\n"
+                         (or posts-count 0)
+                         (or followers-count 0)
+                         (or follows-count 0))
+                 'bluemacs-profile-did did
+                 'bluemacs-profile-handle handle
+                 'bluemacs-follow-uri following)
 
      ;; DID
      (propertize (format "DID: %s\n" did)
-                 'face '(:foreground "gray" :height 0.9))
+                 'face '(:foreground "gray" :height 0.9)
+                 'bluemacs-profile-did did
+                 'bluemacs-profile-handle handle
+                 'bluemacs-follow-uri following)
 
-     (make-string bluemacs-line-width ?=)
-     "\n\n")))
+     (propertize (concat (make-string bluemacs-line-width ?=) "\n\n")
+                 'bluemacs-profile-did did
+                 'bluemacs-profile-handle handle
+                 'bluemacs-follow-uri following))))
 
 (defun bluemacs--display-profile (profile)
   "Display PROFILE in profile buffer."
@@ -1371,6 +1406,71 @@ QUOTE-POST should be a plist with :uri and :cid."
            (bluemacs-refresh-timeline))))
     (message "Invalid repost URI format: %s" repost-uri)))
 
+;;; Following
+
+;;;###autoload
+(defun bluemacs-toggle-follow ()
+  "Follow or unfollow the user whose profile or post is at point."
+  (interactive)
+  (unless bluemacs-access-token
+    (user-error "Not logged in.  Run M-x bluemacs-login first"))
+  (let ((did (or (get-text-property (point) 'bluemacs-profile-did)
+                 (get-text-property (point) 'bluemacs-post-author-did)))
+        (follow-uri (get-text-property (point) 'bluemacs-follow-uri)))
+    (unless did
+      (user-error "No user at point"))
+    (if follow-uri
+        ;; Unfollow: delete the follow record
+        (bluemacs--unfollow-user follow-uri)
+      ;; Follow: create a follow record
+      (bluemacs--follow-user did))))
+
+(defun bluemacs--follow-user (subject-did)
+  "Create a follow record for the user identified by SUBJECT-DID."
+  (let ((record `((subject . ,subject-did)
+                  (createdAt . ,(bluemacs--get-current-timestamp))
+                  ($type . "app.bsky.graph.follow"))))
+    (bluemacs--make-request
+     "/xrpc/com.atproto.repo.createRecord"
+     "POST"
+     `((repo . ,bluemacs-did)
+       (collection . "app.bsky.graph.follow")
+       (record . ,record))
+     (lambda (response _status)
+       (if (plist-get response :uri)
+           (progn
+             (message "Followed!")
+             ;; Refresh current view if it's a profile
+             (when (equal (buffer-name) bluemacs-profile-buffer)
+               (let ((handle (get-text-property (point-min) 'bluemacs-profile-handle)))
+                 (when handle
+                   (bluemacs-view-profile handle)))))
+         (message "Failed to follow: %s"
+                  (or (plist-get response :message) "Unknown error")))))))
+
+(defun bluemacs--unfollow-user (follow-uri)
+  "Delete the follow record identified by FOLLOW-URI."
+  ;; Parse the follow URI to extract repo and rkey
+  ;; URI format: at://did:plc:xxx/app.bsky.graph.follow/rkey
+  (if (string-match "at://\\([^/]+\\)/app\\.bsky\\.graph\\.follow/\\(.+\\)" follow-uri)
+      (let ((repo (match-string 1 follow-uri))
+            (rkey (match-string 2 follow-uri)))
+        (bluemacs--make-request
+         "/xrpc/com.atproto.repo.deleteRecord"
+         "POST"
+         `((repo . ,repo)
+           (collection . "app.bsky.graph.follow")
+           (rkey . ,rkey))
+         (lambda (_response _status)
+           ;; deleteRecord returns empty response on success
+           (message "Unfollowed!")
+           ;; Refresh current view if it's a profile
+           (when (equal (buffer-name) bluemacs-profile-buffer)
+             (let ((handle (get-text-property (point-min) 'bluemacs-profile-handle)))
+               (when handle
+                 (bluemacs-view-profile handle)))))))
+    (message "Invalid follow URI format: %s" follow-uri)))
+
 ;;; Auto-refresh
 
 (declare-function bluemacs-timeline "bluemacs")
@@ -1440,6 +1540,7 @@ QUOTE-POST should be a plist with :uri and :cid."
     (define-key map "Q" #'bluemacs-quote)
     (define-key map "l" #'bluemacs-toggle-like)
     (define-key map "R" #'bluemacs-toggle-repost)
+    (define-key map "f" #'bluemacs-toggle-follow)
     (define-key map "t" #'bluemacs-view-thread)
     (define-key map "N" #'bluemacs-notifications)
     (define-key map "P" #'bluemacs-view-profile)

@@ -10,8 +10,9 @@ A (WIP) Bluesky client for Emacs.
 - Reply to posts with proper threading
 - Like and unlike posts
 - Repost and unrepost posts
+- Follow and unfollow users
 - View notifications (likes, reposts, follows, mentions, replies, quotes)
-- View user profiles with avatar, bio, and stats
+- View user profiles with avatar, bio, stats, and follow status
 - Clickable links in posts
 - Auto-refresh timeline at configurable intervals
 - Simple keybindings
@@ -82,6 +83,7 @@ In the timeline buffer:
 | `Q` | Quote post at point           |
 | `l` | Like/unlike post at point     |
 | `R` | Repost/unrepost post at point |
+| `f` | Follow/unfollow user          |
 | `t` | View thread/replies           |
 | `N` | View notifications            |
 | `P` | View user profile             |
@@ -169,10 +171,6 @@ Reply to any post in your timeline or in thread view:
 4. Write your reply (max 300 characters)
 5. Press `C-c C-c` to send or `C-c C-k` to cancel
 
-**Features:**
-- Replies maintain proper thread structure with parent/root references
-- Works in both timeline and thread views
-- Reply buffer shows the URI of the post you're replying to
 
 ## Viewing Threads
 
@@ -183,11 +181,6 @@ View conversation threads with all replies:
 3. Replies are indented to show conversation hierarchy
 4. Press `b` to go back to the timeline
 
-**Features:**
-- Fetches up to 10 levels of nested replies
-- 2-space indentation per reply level
-- Shows reply counts and hints when posts have replies
-
 ## Liking Posts
 
 Like or unlike any post with a single keypress:
@@ -196,10 +189,6 @@ Like or unlike any post with a single keypress:
 2. Press `l` (or run `M-x bluemacs-toggle-like`)
 3. The timeline refreshes to show the updated like status
 
-**Features:**
-- Posts you've liked show a ♥ symbol in the stats line
-- Works in both timeline and thread views
-
 ## Reposting
 
 Repost (boost/retweet) any post to share it with your followers:
@@ -207,11 +196,6 @@ Repost (boost/retweet) any post to share it with your followers:
 1. Navigate to the post you want to repost
 2. Press `R` (shift+r, or run `M-x bluemacs-toggle-repost`)
 3. The timeline refreshes to show the updated repost status
-
-**Features:**
-- Posts you've reposted show a ♻ symbol in the stats line
-- When viewing your timeline, reposted posts show who reposted them with a green header line
-- Works in both timeline and thread views
 
 **Display format for reposts in timeline:**
 ```
@@ -223,13 +207,6 @@ Post content here...
 ## Images
 
 bluemacs can display embedded images inline when running in graphical Emacs.
-
-### Features
-
-- Automatic display of embedded images in posts
-- Image resizing to fit configured dimensions
-- Alt text support
-- Works only in graphical Emacs (shows alt text in terminal mode)
 
 ### Usage
 
@@ -257,14 +234,6 @@ bluemacs supports both viewing and creating quote posts.
 ### Viewing Quote Posts
 
 Quote posts are automatically displayed in your timeline with a bordered box around the quoted content.
-
-**Features:**
-- Quote posts are displayed with a bordered box around the quoted content
-- Shows the author and text of the quoted post
-- Works for both simple quote posts and quote posts with images
-- Links in quoted posts are also clickable
-- **Interactive**: Press `RET` (Enter) on a quoted post to view its full thread with all interactions
-- The quoted post section is highlighted when you hover over it
 
 **Usage:**
 1. Navigate to a post that contains a quote (you'll see the bordered box)
@@ -312,7 +281,6 @@ Or press `N` from the timeline buffer.
   - ↩ Replies
   - 💬 Quote posts
 - **Unread notifications** are shown in bold text
-- Shows the post text (when applicable)
 - Press `t` on any notification to view the full thread
 - Fetches the 50 most recent notifications
 
@@ -341,11 +309,25 @@ M-x bluemacs-view-profile RET username.bsky.social RET
 - Banner image (if available, in graphical Emacs)
 - Avatar image (if available, in graphical Emacs)
 - Display name and handle
+- Follow status (Following, Follows you, or both)
 - Bio/description
 - Stats: post count, follower count, following count
 - DID (Decentralized Identifier)
 
 **Note:** Profile images only display in graphical Emacs. The profile information is shown in a dedicated buffer.
+
+## Following Users
+
+Follow or unfollow users to customize your timeline:
+
+**From a profile:**
+1. View a user's profile (press `P` on any of their posts)
+2. Press `f` to follow or unfollow the user
+3. The profile refreshes to show the updated follow status
+
+**From the timeline:**
+1. Navigate to any post
+2. Press `f` to follow or unfollow the post's author
 
 ## Saving Credentials
 
@@ -417,6 +399,7 @@ With credentials saved, `bluemacs-login` will automatically use them without pro
 | `bluemacs-quote`                  | Quote post at point with commentary      |
 | `bluemacs-toggle-like`            | Like or unlike post at point             |
 | `bluemacs-toggle-repost`          | Repost or unrepost post at point         |
+| `bluemacs-toggle-follow`          | Follow or unfollow user at point         |
 | `bluemacs-view-thread`            | View thread/replies for post at point    |
 | `bluemacs-view-quoted-post`       | View thread for quoted post at point     |
 | `bluemacs-view-profile`           | View user profile                        |
@@ -450,12 +433,13 @@ Completed features:
 - [x] Display quote posts
 - [x] Create quote posts
 - [x] Display repost attribution in timeline
+- [x] Follow and unfollow users
 - [x] Notifications
 - [x] View user profiles
 
 Future features planned:
 - [ ] View recent posts when viewing profile
-- [ ] Follow/unfollow
+- [ ] View user profile from follow notification
 
 ## Contributing
 
